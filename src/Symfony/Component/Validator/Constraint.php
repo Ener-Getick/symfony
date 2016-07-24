@@ -19,9 +19,9 @@ use Symfony\Component\Validator\Exception\MissingOptionsException;
 /**
  * Contains the properties of a constraint definition.
  *
- * A constraint can be defined on a class, an option or a getter method.
+ * A constraint can be defined on a class, a property or a getter method.
  * The Constraint class encapsulates all the configuration required for
- * validating this class, option or getter result successfully.
+ * validating this class, property or getter result successfully.
  *
  * Constraint instances are immutable and serializable.
  *
@@ -69,7 +69,7 @@ abstract class Constraint
     /**
      * Returns the name of the given error code.
      *
-     * @param int $errorCode The error code
+     * @param string $errorCode The error code
      *
      * @return string The name of the error code
      *
@@ -207,8 +207,6 @@ abstract class Constraint
      * @throws InvalidOptionsException If an invalid option name is given
      *
      * @internal This method should not be used or overwritten in userland code.
-     *
-     * @since 2.6
      */
     public function __get($option)
     {
@@ -296,8 +294,6 @@ abstract class Constraint
      * @internal This method may be replaced by an implementation of
      *           {@link \Serializable} in the future. Please don't use or
      *           overwrite it.
-     *
-     * @since 2.6
      */
     public function __sleep()
     {

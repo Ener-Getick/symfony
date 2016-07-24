@@ -13,6 +13,7 @@
             <argument type="service" id="event_dispatcher" />
             <argument type="service" id="controller_resolver" />
             <argument type="service" id="request_stack" />
+            <argument type="service" id="argument_resolver" />
         </service>
 
         <service id="request_stack" class="Symfony\Component\HttpFoundation\RequestStack" />
@@ -23,6 +24,17 @@
 
         <service id="kernel.class_cache.cache_warmer" class="Symfony\Bundle\FrameworkBundle\CacheWarmer\ClassCacheCacheWarmer">
             <tag name="kernel.cache_warmer" />
+            <argument type="collection">
+                <argument>Doctrine\Common\Annotations\AnnotationRegistry</argument>
+                <argument>Symfony\Component\HttpFoundation\ParameterBag</argument>
+                <argument>Symfony\Component\HttpFoundation\HeaderBag</argument>
+                <argument>Symfony\Component\HttpFoundation\FileBag</argument>
+                <argument>Symfony\Component\HttpFoundation\ServerBag</argument>
+                <argument>Symfony\Component\HttpFoundation\Request</argument>
+                <argument>Symfony\Component\HttpKernel\Kernel</argument>
+                <argument>Symfony\Component\ClassLoader\ClassCollectionLoader</argument>
+                <argument>Symfony\Component\ClassLoader\ApcClassLoader</argument>
+            </argument>
         </service>
 
         <service id="cache_clearer" class="Symfony\Component\HttpKernel\CacheClearer\ChainCacheClearer">
@@ -31,6 +43,7 @@
 
         <service id="service_container" synthetic="true">
             <autowiring-type>Symfony\Component\DependencyInjection\ContainerInterface</autowiring-type>
+            <autowiring-type>Symfony\Component\DependencyInjection\Container</autowiring-type>
         </service>
 
         <service id="kernel" synthetic="true" />

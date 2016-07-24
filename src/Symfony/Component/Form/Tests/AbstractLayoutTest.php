@@ -517,6 +517,25 @@ abstract class AbstractLayoutTest extends \Symfony\Component\Form\Test\FormInteg
         );
     }
 
+    public function testSelectWithSizeBiggerThanOneCanBeRequired()
+    {
+        $form = $this->factory->createNamed('name', 'Symfony\Component\Form\Extension\Core\Type\ChoiceType', null, array(
+            'choices' => array('a', 'b'),
+            'multiple' => false,
+            'expanded' => false,
+            'attr' => array('size' => 2),
+        ));
+
+        $this->assertWidgetMatchesXpath($form->createView(), array(),
+'/select
+    [@name="name"]
+    [@required="required"]
+    [@size="2"]
+    [count(./option)=2]
+'
+        );
+    }
+
     public function testSingleChoiceWithoutTranslation()
     {
         $form = $this->factory->createNamed('name', 'Symfony\Component\Form\Extension\Core\Type\ChoiceType', '&a', array(
@@ -582,6 +601,53 @@ abstract class AbstractLayoutTest extends \Symfony\Component\Form\Test\FormInteg
         /following-sibling::option[@value="&b"][@class="foo&bar"][not(@selected)][.="[trans]Choice&B[/trans]"]
     ]
     [count(./option)=2]
+'
+        );
+    }
+
+    public function testSingleChoiceAttributesWithMainAttributes()
+    {
+        $form = $this->factory->createNamed('name', 'Symfony\Component\Form\Extension\Core\Type\ChoiceType', '&a', array(
+            'choices' => array('Choice&A' => '&a', 'Choice&B' => '&b'),
+            'multiple' => false,
+            'expanded' => false,
+            'attr' => array('class' => 'bar&baz'),
+        ));
+
+        $this->assertWidgetMatchesXpath($form->createView(), array('attr' => array('class' => 'bar&baz')),
+'/select
+    [@name="name"]
+    [@class="bar&baz"]
+    [not(@required)]
+    [
+        ./option[@value="&a"][@selected="selected"][.="[trans]Choice&A[/trans]"]
+        /following-sibling::option[@value="&b"][not(@class)][not(@selected)][.="[trans]Choice&B[/trans]"]
+    ]
+    [count(./option)=2]
+'
+        );
+    }
+
+    public function testSingleExpandedChoiceAttributesWithMainAttributes()
+    {
+        $form = $this->factory->createNamed('name', 'Symfony\Component\Form\Extension\Core\Type\ChoiceType', '&a', array(
+            'choices' => array('Choice&A' => '&a', 'Choice&B' => '&b'),
+            'multiple' => false,
+            'expanded' => true,
+            'attr' => array('class' => 'bar&baz'),
+        ));
+
+        $this->assertWidgetMatchesXpath($form->createView(), array('attr' => array('class' => 'bar&baz')),
+'/div
+    [@class="bar&baz"]
+    [
+        ./input[@type="radio"][@name="name"][@id="name_0"][@value="&a"][@checked]
+        /following-sibling::label[@for="name_0"][.="[trans]Choice&A[/trans]"]
+        /following-sibling::input[@type="radio"][@name="name"][@id="name_1"][@value="&b"][not(@checked)]
+        /following-sibling::label[@for="name_1"][.="[trans]Choice&B[/trans]"]
+        /following-sibling::input[@type="hidden"][@id="name__token"]
+    ]
+    [count(./input)=3]
 '
         );
     }
@@ -943,6 +1009,7 @@ abstract class AbstractLayoutTest extends \Symfony\Component\Form\Test\FormInteg
             'multiple' => false,
             'expanded' => true,
             'choice_translation_domain' => false,
+            'placeholder' => 'Placeholder&Not&Translated',
         ));
 
         $this->assertWidgetMatchesXpath($form->createView(), array(),
@@ -989,6 +1056,7 @@ abstract class AbstractLayoutTest extends \Symfony\Component\Form\Test\FormInteg
             'multiple' => false,
             'expanded' => true,
             'placeholder' => 'Test&Me',
+            'required' => false,
         ));
 
         $this->assertWidgetMatchesXpath($form->createView(), array(),
@@ -1013,7 +1081,8 @@ abstract class AbstractLayoutTest extends \Symfony\Component\Form\Test\FormInteg
             'choices' => array('Choice&A' => '&a', 'Choice&B' => '&b'),
             'multiple' => false,
             'expanded' => true,
-            'translation_domain' => false,
+            'required' => false,
+            'choice_translation_domain' => false,
             'placeholder' => 'Placeholder&Not&Translated',
         ));
 

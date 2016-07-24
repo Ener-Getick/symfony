@@ -16,6 +16,7 @@ use Symfony\Component\Console\Helper\DebugFormatterHelper;
 use Symfony\Component\Console\Helper\ProcessHelper;
 use Symfony\Component\Console\Helper\QuestionHelper;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\StreamableInputInterface;
 use Symfony\Component\Console\Input\ArgvInput;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputDefinition;
@@ -64,12 +65,11 @@ class Application
     private $definition;
     private $helperSet;
     private $dispatcher;
-    private $terminalDimensions;
+    private $terminal;
     private $defaultCommand;
+    private $singleCommand;
 
     /**
-     * Constructor.
-     *
      * @param string $name    The name of the application
      * @param string $version The version of the application
      */
@@ -77,6 +77,7 @@ class Application
     {
         $this->name = $name;
         $this->version = $version;
+        $this->terminal = new Terminal();
         $this->defaultCommand = 'list';
         $this->helperSet = $this->getDefaultHelperSet();
         $this->definition = $this->getDefaultInputDefinition();
@@ -168,7 +169,7 @@ class Application
         if (true === $input->hasParameterOption(array('--help', '-h'), true)) {
             if (!$name) {
                 $name = 'help';
-                $input = new ArrayInput(array('command' => 'help'));
+                $input = new ArrayInput(array('command_name' => $this->defaultCommand));
             } else {
                 $this->wantHelps = true;
             }
@@ -226,17 +227,34 @@ class Application
      */
     public function getDefinition()
     {
+        if ($this->singleCommand) {
+            $inputDefinition = $this->definition;
+            $inputDefinition->setArguments();
+
+            return $inputDefinition;
+        }
+
         return $this->definition;
     }
 
     /**
      * Gets the help message.
      *
-     * @return string A help message.
+     * @return string A help message
      */
     public function getHelp()
     {
         return $this->getLongVersion();
+    }
+
+    /**
+     * Gets whether to catch exceptions or not during commands execution.
+     *
+     * @return bool Whether to catch exceptions or not during commands execution
+     */
+    public function areExceptionsCaught()
+    {
+        return $this->catchExceptions;
     }
 
     /**
@@ -247,6 +265,16 @@ class Application
     public function setCatchExceptions($boolean)
     {
         $this->catchExceptions = (bool) $boolean;
+    }
+
+    /**
+     * Gets whether to automatically exit after a command execution or not.
+     *
+     * @return bool Whether to automatically exit after a command execution or not
+     */
+    public function isAutoExitEnabled()
+    {
+        return $this->autoExit;
     }
 
     /**
@@ -424,7 +452,7 @@ class Application
     public function getNamespaces()
     {
         $namespaces = array();
-        foreach ($this->commands as $command) {
+        foreach ($this->all() as $command) {
             $namespaces = array_merge($namespaces, $this->extractAllNamespaces($command->getName()));
 
             foreach ($command->getAliases() as $alias) {
@@ -588,11 +616,15 @@ class Application
         $output->writeln('', OutputInterface::VERBOSITY_QUIET);
 
         do {
-            $title = sprintf('  [%s]  ', get_class($e));
+            $title = sprintf(
+                '  [%s%s]  ',
+                get_class($e),
+                $output->isVerbose() && 0 !== ($code = $e->getCode()) ? ' ('.$code.')' : ''
+            );
 
             $len = $this->stringWidth($title);
 
-            $width = $this->getTerminalWidth() ? $this->getTerminalWidth() - 1 : PHP_INT_MAX;
+            $width = $this->terminal->getWidth() ? $this->terminal->getWidth() - 1 : PHP_INT_MAX;
             // HHVM only accepts 32 bits integer in str_split, even when PHP_INT_MAX is a 64 bit integer: https://github.com/facebook/hhvm/issues/1327
             if (defined('HHVM_VERSION') && $width > 1 << 31) {
                 $width = 1 << 31;
@@ -656,60 +688,42 @@ class Application
      * Tries to figure out the terminal width in which this application runs.
      *
      * @return int|null
+     *
+     * @deprecated since version 3.2, to be removed in 4.0. Create a Terminal instance instead.
      */
     protected function getTerminalWidth()
     {
-        $dimensions = $this->getTerminalDimensions();
+        @trigger_error(sprintf('%s is deprecated as of 3.2 and will be removed in 4.0. Create a Terminal instance instead.', __METHOD__), E_USER_DEPRECATED);
 
-        return $dimensions[0];
+        return $this->terminal->getWidth();
     }
 
     /**
      * Tries to figure out the terminal height in which this application runs.
      *
      * @return int|null
+     *
+     * @deprecated since version 3.2, to be removed in 4.0. Create a Terminal instance instead.
      */
     protected function getTerminalHeight()
     {
-        $dimensions = $this->getTerminalDimensions();
+        @trigger_error(sprintf('%s is deprecated as of 3.2 and will be removed in 4.0. Create a Terminal instance instead.', __METHOD__), E_USER_DEPRECATED);
 
-        return $dimensions[1];
+        return $this->terminal->getHeight();
     }
 
     /**
      * Tries to figure out the terminal dimensions based on the current environment.
      *
      * @return array Array containing width and height
+     *
+     * @deprecated since version 3.2, to be removed in 4.0. Create a Terminal instance instead.
      */
     public function getTerminalDimensions()
     {
-        if ($this->terminalDimensions) {
-            return $this->terminalDimensions;
-        }
+        @trigger_error(sprintf('%s is deprecated as of 3.2 and will be removed in 4.0. Create a Terminal instance instead.', __METHOD__), E_USER_DEPRECATED);
 
-        if ('\\' === DIRECTORY_SEPARATOR) {
-            // extract [w, H] from "wxh (WxH)"
-            if (preg_match('/^(\d+)x\d+ \(\d+x(\d+)\)$/', trim(getenv('ANSICON')), $matches)) {
-                return array((int) $matches[1], (int) $matches[2]);
-            }
-            // extract [w, h] from "wxh"
-            if (preg_match('/^(\d+)x(\d+)$/', $this->getConsoleMode(), $matches)) {
-                return array((int) $matches[1], (int) $matches[2]);
-            }
-        }
-
-        if ($sttyString = $this->getSttyColumns()) {
-            // extract [w, h] from "rows h; columns w;"
-            if (preg_match('/rows.(\d+);.columns.(\d+);/i', $sttyString, $matches)) {
-                return array((int) $matches[2], (int) $matches[1]);
-            }
-            // extract [w, h] from "; h rows; w columns"
-            if (preg_match('/;.(\d+).rows;.(\d+).columns/i', $sttyString, $matches)) {
-                return array((int) $matches[2], (int) $matches[1]);
-            }
-        }
-
-        return array(null, null);
+        return array($this->terminal->getWidth(), $this->terminal->getHeight());
     }
 
     /**
@@ -721,10 +735,15 @@ class Application
      * @param int $height The height
      *
      * @return Application The current application
+     *
+     * @deprecated since version 3.2, to be removed in 4.0. Set the COLUMNS and LINES env vars instead.
      */
     public function setTerminalDimensions($width, $height)
     {
-        $this->terminalDimensions = array($width, $height);
+        @trigger_error(sprintf('%s is deprecated as of 3.2 and will be removed in 4.0. Set the COLUMNS and LINES env vars instead.', __METHOD__), E_USER_DEPRECATED);
+
+        putenv('COLUMNS='.$width);
+        putenv('LINES='.$height);
 
         return $this;
     }
@@ -745,8 +764,19 @@ class Application
 
         if (true === $input->hasParameterOption(array('--no-interaction', '-n'), true)) {
             $input->setInteractive(false);
-        } elseif (function_exists('posix_isatty') && $this->getHelperSet()->has('question')) {
-            $inputStream = $this->getHelperSet()->get('question')->getInputStream();
+        } elseif (function_exists('posix_isatty')) {
+            $inputStream = null;
+
+            if ($input instanceof StreamableInputInterface) {
+                $inputStream = $input->getStream();
+            }
+
+            // This check ensures that calling QuestionHelper::setInputStream() works
+            // To be removed in 4.0 (in the same time as QuestionHelper::setInputStream)
+            if (!$inputStream && $this->getHelperSet()->has('question')) {
+                $inputStream = $this->getHelperSet()->get('question')->getInputStream(false);
+            }
+
             if (!@posix_isatty($inputStream) && false === getenv('SHELL_INTERACTIVE')) {
                 $input->setInteractive(false);
             }
@@ -835,7 +865,7 @@ class Application
      */
     protected function getCommandName(InputInterface $input)
     {
-        return $input->getFirstArgument();
+        return $this->singleCommand ? $this->defaultCommand : $input->getFirstArgument();
     }
 
     /**
@@ -881,54 +911,6 @@ class Application
             new ProcessHelper(),
             new QuestionHelper(),
         ));
-    }
-
-    /**
-     * Runs and parses stty -a if it's available, suppressing any error output.
-     *
-     * @return string
-     */
-    private function getSttyColumns()
-    {
-        if (!function_exists('proc_open')) {
-            return;
-        }
-
-        $descriptorspec = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
-        $process = proc_open('stty -a | grep columns', $descriptorspec, $pipes, null, null, array('suppress_errors' => true));
-        if (is_resource($process)) {
-            $info = stream_get_contents($pipes[1]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
-
-            return $info;
-        }
-    }
-
-    /**
-     * Runs and parses mode CON if it's available, suppressing any error output.
-     *
-     * @return string <width>x<height> or null if it could not be parsed
-     */
-    private function getConsoleMode()
-    {
-        if (!function_exists('proc_open')) {
-            return;
-        }
-
-        $descriptorspec = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
-        $process = proc_open('mode CON', $descriptorspec, $pipes, null, null, array('suppress_errors' => true));
-        if (is_resource($process)) {
-            $info = stream_get_contents($pipes[1]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
-
-            if (preg_match('/--------+\r?\n.+?(\d+)\r?\n.+?(\d+)\r?\n/', $info, $matches)) {
-                return $matches[2].'x'.$matches[1];
-            }
-        }
     }
 
     /**
@@ -1015,11 +997,21 @@ class Application
     /**
      * Sets the default Command name.
      *
-     * @param string $commandName The Command name
+     * @param string $commandName     The Command name
+     * @param bool   $isSingleCommand Set to true if there is only one command in this application
      */
-    public function setDefaultCommand($commandName)
+    public function setDefaultCommand($commandName, $isSingleCommand = false)
     {
         $this->defaultCommand = $commandName;
+
+        if ($isSingleCommand) {
+            // Ensure the command exist
+            $this->find($commandName);
+
+            $this->singleCommand = true;
+        }
+
+        return $this;
     }
 
     private function stringWidth($string)

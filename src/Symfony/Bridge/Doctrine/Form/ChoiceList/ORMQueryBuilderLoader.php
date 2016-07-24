@@ -35,7 +35,7 @@ class ORMQueryBuilderLoader implements EntityLoaderInterface
     /**
      * Construct an ORM Query Builder Loader.
      *
-     * @param QueryBuilder $queryBuilder The query builder for creating the query builder.
+     * @param QueryBuilder $queryBuilder The query builder for creating the query builder
      */
     public function __construct(QueryBuilder $queryBuilder)
     {
@@ -71,6 +71,13 @@ class ORMQueryBuilderLoader implements EntityLoaderInterface
             // databases such as PostgreSQL fail.
             $values = array_values(array_filter($values, function ($v) {
                 return (string) $v === (string) (int) $v;
+            }));
+        } elseif ('guid' === $metadata->getTypeOfField($identifier)) {
+            $parameterType = Connection::PARAM_STR_ARRAY;
+
+            // Like above, but we just filter out empty strings.
+            $values = array_values(array_filter($values, function ($v) {
+                return (string) $v !== '';
             }));
         } else {
             $parameterType = Connection::PARAM_STR_ARRAY;

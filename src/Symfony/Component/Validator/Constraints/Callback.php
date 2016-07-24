@@ -23,8 +23,6 @@ class Callback extends Constraint
 {
     /**
      * @var string|callable
-     *
-     * @since 2.4
      */
     public $callback;
 
@@ -38,7 +36,7 @@ class Callback extends Constraint
             $options = $options['value'];
         }
 
-        if (is_array($options) && !isset($options['callback']) && !isset($options['groups'])) {
+        if (is_array($options) && !isset($options['callback']) && !isset($options['groups']) && !isset($options['payload'])) {
             $options = array('callback' => $options);
         }
 

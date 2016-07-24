@@ -11,6 +11,7 @@
 
 namespace Symfony\Component\Cache\Adapter;
 
+use Symfony\Component\Cache\CacheItem;
 use Symfony\Component\Cache\Exception\CacheException;
 
 /**
@@ -18,15 +19,29 @@ use Symfony\Component\Cache\Exception\CacheException;
  */
 class ApcuAdapter extends AbstractAdapter
 {
-    public function __construct($namespace = '', $defaultLifetime = 0)
+    public static function isSupported()
     {
-        if (!function_exists('apcu_fetch') || !ini_get('apc.enabled') || ('cli' === PHP_SAPI && !ini_get('apc.enable_cli'))) {
+        return function_exists('apcu_fetch') && ini_get('apc.enabled') && !('cli' === PHP_SAPI && !ini_get('apc.enable_cli'));
+    }
+
+    public function __construct($namespace = '', $defaultLifetime = 0, $version = null)
+    {
+        if (!static::isSupported()) {
             throw new CacheException('APCu is not enabled');
         }
         if ('cli' === PHP_SAPI) {
             ini_set('apc.use_request_time', 0);
         }
         parent::__construct($namespace, $defaultLifetime);
+
+        if (null !== $version) {
+            CacheItem::validateKey($version);
+
+            if (!apcu_exists($version.':'.$namespace)) {
+                $this->clear($namespace);
+                apcu_add($version.':'.$namespace, null);
+            }
+        }
     }
 
     /**
@@ -48,9 +63,11 @@ class ApcuAdapter extends AbstractAdapter
     /**
      * {@inheritdoc}
      */
-    protected function doClear()
+    protected function doClear($namespace)
     {
-        return apcu_clear_cache();
+        return isset($namespace[0]) && class_exists('APCuIterator', false)
+            ? apcu_delete(new \APCuIterator(sprintf('/^%s/', preg_quote($namespace, '/')), APC_ITER_KEY))
+            : apcu_clear_cache();
     }
 
     /**
@@ -70,6 +87,17 @@ class ApcuAdapter extends AbstractAdapter
      */
     protected function doSave(array $values, $lifetime)
     {
-        return apcu_store($values, null, $lifetime);
+        try {
+            return array_keys(apcu_store($values, null, $lifetime));
+        } catch (\Error $e) {
+        } catch (\Exception $e) {
+        }
+
+        if (1 === count($values)) {
+            // Workaround https://github.com/krakjoe/apcu/issues/170
+            apcu_delete(key($values));
+        }
+
+        throw $e;
     }
 }

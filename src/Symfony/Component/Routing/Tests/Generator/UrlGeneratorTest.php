@@ -297,10 +297,22 @@ class UrlGeneratorTest extends \PHPUnit_Framework_TestCase
 
     public function testQueryParamSameAsDefault()
     {
-        $routes = $this->getRoutes('test', new Route('/test', array('default' => 'value')));
+        $routes = $this->getRoutes('test', new Route('/test', array('page' => 1)));
 
-        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test', array('default' => 'foo')));
-        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test', array('default' => 'value')));
+        $this->assertSame('/app.php/test?page=2', $this->getGenerator($routes)->generate('test', array('page' => 2)));
+        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test', array('page' => 1)));
+        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test', array('page' => '1')));
+        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test'));
+    }
+
+    public function testArrayQueryParamSameAsDefault()
+    {
+        $routes = $this->getRoutes('test', new Route('/test', array('array' => array('foo', 'bar'))));
+
+        $this->assertSame('/app.php/test?array%5B0%5D=bar&array%5B1%5D=foo', $this->getGenerator($routes)->generate('test', array('array' => array('bar', 'foo'))));
+        $this->assertSame('/app.php/test?array%5Ba%5D=foo&array%5Bb%5D=bar', $this->getGenerator($routes)->generate('test', array('array' => array('a' => 'foo', 'b' => 'bar'))));
+        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test', array('array' => array('foo', 'bar'))));
+        $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test', array('array' => array(1 => 'bar', 0 => 'foo'))));
         $this->assertSame('/app.php/test', $this->getGenerator($routes)->generate('test'));
     }
 
@@ -622,6 +634,25 @@ class UrlGeneratorTest extends \PHPUnit_Framework_TestCase
         );
     }
 
+    public function testFragmentsCanBeAppendedToUrls()
+    {
+        $routes = $this->getRoutes('test', new Route('/testing'));
+
+        $url = $this->getGenerator($routes)->generate('test', array('_fragment' => 'frag ment'), true);
+        $this->assertEquals('/app.php/testing#frag%20ment', $url);
+
+        $url = $this->getGenerator($routes)->generate('test', array('_fragment' => '0'), true);
+        $this->assertEquals('/app.php/testing#0', $url);
+    }
+
+    public function testFragmentsDoNotEscapeValidCharacters()
+    {
+        $routes = $this->getRoutes('test', new Route('/testing'));
+        $url = $this->getGenerator($routes)->generate('test', array('_fragment' => '?/'), true);
+
+        $this->assertEquals('/app.php/testing#?/', $url);
+    }
+
     protected function getGenerator(RouteCollection $routes, array $parameters = array(), $logger = null)
     {
         $context = new RequestContext('/app.php');
@@ -629,9 +660,8 @@ class UrlGeneratorTest extends \PHPUnit_Framework_TestCase
             $method = 'set'.$key;
             $context->$method($value);
         }
-        $generator = new UrlGenerator($routes, $context, $logger);
 
-        return $generator;
+        return new UrlGenerator($routes, $context, $logger);
     }
 
     protected function getRoutes($name, Route $route)

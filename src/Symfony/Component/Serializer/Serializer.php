@@ -15,6 +15,8 @@ use Symfony\Component\Serializer\Encoder\ChainDecoder;
 use Symfony\Component\Serializer\Encoder\ChainEncoder;
 use Symfony\Component\Serializer\Encoder\EncoderInterface;
 use Symfony\Component\Serializer\Encoder\DecoderInterface;
+use Symfony\Component\Serializer\Normalizer\DenormalizerAwareInterface;
+use Symfony\Component\Serializer\Normalizer\NormalizerAwareInterface;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
 use Symfony\Component\Serializer\Exception\LogicException;
@@ -41,20 +43,28 @@ class Serializer implements SerializerInterface, NormalizerInterface, Denormaliz
      * @var Encoder\ChainEncoder
      */
     protected $encoder;
+
     /**
      * @var Encoder\ChainDecoder
      */
     protected $decoder;
+
     /**
      * @var array
      */
     protected $normalizers = array();
+
     /**
      * @var array
+     *
+     * @deprecated since 3.1 will be removed in 4.0
      */
     protected $normalizerCache = array();
+
     /**
      * @var array
+     *
+     * @deprecated since 3.1 will be removed in 4.0
      */
     protected $denormalizerCache = array();
 
@@ -63,6 +73,14 @@ class Serializer implements SerializerInterface, NormalizerInterface, Denormaliz
         foreach ($normalizers as $normalizer) {
             if ($normalizer instanceof SerializerAwareInterface) {
                 $normalizer->setSerializer($this);
+            }
+
+            if ($normalizer instanceof DenormalizerAwareInterface) {
+                $normalizer->setDenormalizer($this);
+            }
+
+            if ($normalizer instanceof NormalizerAwareInterface) {
+                $normalizer->setNormalizer($this);
             }
         }
         $this->normalizers = $normalizers;
@@ -244,13 +262,6 @@ class Serializer implements SerializerInterface, NormalizerInterface, Denormaliz
 
         if ($normalizer = $this->getDenormalizer($data, $class, $format)) {
             return $normalizer->denormalize($data, $class, $format, $context);
-        }
-
-        foreach ($this->normalizers as $normalizer) {
-            if ($normalizer instanceof DenormalizerInterface
-                && $normalizer->supportsDenormalization($data, $class, $format)) {
-                return $normalizer->denormalize($data, $class, $format, $context);
-            }
         }
 
         throw new UnexpectedValueException(sprintf('Could not denormalize object of type %s, no supporting normalizer found.', $class));

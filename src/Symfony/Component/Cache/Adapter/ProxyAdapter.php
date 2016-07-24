@@ -18,24 +18,34 @@ use Symfony\Component\Cache\CacheItem;
 /**
  * @author Nicolas Grekas <p@tchwork.com>
  */
-class ProxyAdapter implements CacheItemPoolInterface
+class ProxyAdapter implements AdapterInterface
 {
     private $pool;
+    private $namespace;
+    private $namespaceLen;
     private $createCacheItem;
+    private $poolHash;
 
-    public function __construct(CacheItemPoolInterface $pool)
+    public function __construct(CacheItemPoolInterface $pool, $namespace = '', $defaultLifetime = 0)
     {
         $this->pool = $pool;
+        $this->poolHash = $poolHash = spl_object_hash($pool);
+        $this->namespace = '' === $namespace ? '' : $this->getId($namespace);
+        $this->namespaceLen = strlen($namespace);
         $this->createCacheItem = \Closure::bind(
-            function ($key, $value, $isHit) {
+            function ($key, $innerItem) use ($defaultLifetime, $poolHash) {
                 $item = new CacheItem();
                 $item->key = $key;
-                $item->value = $value;
-                $item->isHit = $isHit;
+                $item->value = $innerItem->get();
+                $item->isHit = $innerItem->isHit();
+                $item->defaultLifetime = $defaultLifetime;
+                $item->innerItem = $innerItem;
+                $item->poolHash = $poolHash;
+                $innerItem->set(null);
 
                 return $item;
             },
-            $this,
+            null,
             CacheItem::class
         );
     }
@@ -46,9 +56,9 @@ class ProxyAdapter implements CacheItemPoolInterface
     public function getItem($key)
     {
         $f = $this->createCacheItem;
-        $item = $this->pool->getItem($key);
+        $item = $this->pool->getItem($this->getId($key));
 
-        return $f($key, $item->get(), $item->isHit());
+        return $f($key, $item);
     }
 
     /**
@@ -56,14 +66,13 @@ class ProxyAdapter implements CacheItemPoolInterface
      */
     public function getItems(array $keys = array())
     {
-        $f = $this->createCacheItem;
-        $items = array();
-
-        foreach ($this->pool->getItems($keys) as $key => $item) {
-            $items[$key] = $f($key, $item->get(), $item->isHit());
+        if ($this->namespaceLen) {
+            foreach ($keys as $i => $key) {
+                $keys[$i] = $this->getId($key);
+            }
         }
 
-        return $items;
+        return $this->generateItems($this->pool->getItems($keys));
     }
 
     /**
@@ -71,7 +80,7 @@ class ProxyAdapter implements CacheItemPoolInterface
      */
     public function hasItem($key)
     {
-        return $this->pool->hasItem($key);
+        return $this->pool->hasItem($this->getId($key));
     }
 
     /**
@@ -87,7 +96,7 @@ class ProxyAdapter implements CacheItemPoolInterface
      */
     public function deleteItem($key)
     {
-        return $this->pool->deleteItem($key);
+        return $this->pool->deleteItem($this->getId($key));
     }
 
     /**
@@ -95,6 +104,12 @@ class ProxyAdapter implements CacheItemPoolInterface
      */
     public function deleteItems(array $keys)
     {
+        if ($this->namespaceLen) {
+            foreach ($keys as $i => $key) {
+                $keys[$i] = $this->getId($key);
+            }
+        }
+
         return $this->pool->deleteItems($keys);
     }
 
@@ -127,12 +142,32 @@ class ProxyAdapter implements CacheItemPoolInterface
         if (!$item instanceof CacheItem) {
             return false;
         }
-        static $prefix = "\0Symfony\Component\Cache\CacheItem\0";
         $item = (array) $item;
-        $poolItem = $this->pool->getItem($item[$prefix.'key']);
-        $poolItem->set($item[$prefix.'value']);
-        $poolItem->expiresAfter($item[$prefix.'lifetime']);
+        $expiry = $item["\0*\0expiry"];
+        $innerItem = $item["\0*\0poolHash"] === $this->poolHash ? $item["\0*\0innerItem"] : $this->pool->getItem($this->namespace.$item["\0*\0key"]);
+        $innerItem->set($item["\0*\0value"]);
+        $innerItem->expiresAt(null !== $expiry ? \DateTime::createFromFormat('U', $expiry) : null);
 
-        return $this->pool->$method($poolItem);
+        return $this->pool->$method($innerItem);
+    }
+
+    private function generateItems($items)
+    {
+        $f = $this->createCacheItem;
+
+        foreach ($items as $key => $item) {
+            if ($this->namespaceLen) {
+                $key = substr($key, $this->namespaceLen);
+            }
+
+            yield $key => $f($key, $item);
+        }
+    }
+
+    private function getId($key)
+    {
+        CacheItem::validateKey($key);
+
+        return $this->namespace.$key;
     }
 }

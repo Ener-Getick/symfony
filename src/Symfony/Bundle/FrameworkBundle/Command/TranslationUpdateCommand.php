@@ -44,11 +44,13 @@ class TranslationUpdateCommand extends ContainerAwareCommand
                 new InputOption('force', null, InputOption::VALUE_NONE, 'Should the update be done'),
                 new InputOption('no-backup', null, InputOption::VALUE_NONE, 'Should backup be disabled'),
                 new InputOption('clean', null, InputOption::VALUE_NONE, 'Should clean not found messages'),
+                new InputOption('domain', null, InputOption::VALUE_OPTIONAL, 'Specify the domain to update'),
             ))
             ->setDescription('Updates the translation file')
             ->setHelp(<<<'EOF'
-The <info>%command.name%</info> command extract translation strings from templates
+The <info>%command.name%</info> command extracts translation strings from templates
 of a given bundle or the app folder. It can display them or merge the new ones into the translation files.
+
 When new translation strings are found it can automatically add a prefix to the translation
 message.
 
@@ -138,6 +140,11 @@ EOF
             }
         }
 
+        if (null !== $domain = $input->getOption('domain')) {
+            $currentCatalogue = $this->filterCatalogue($currentCatalogue, $domain);
+            $extractedCatalogue = $this->filterCatalogue($extractedCatalogue, $domain);
+        }
+
         // process catalogues
         $operation = $input->getOption('clean')
             ? new TargetOperation($currentCatalogue, $extractedCatalogue)
@@ -149,6 +156,8 @@ EOF
 
             return;
         }
+
+        $resultMessage = 'Translation files were successfully updated';
 
         // show compiled list of messages
         if (true === $input->getOption('dump-messages')) {
@@ -204,12 +213,29 @@ EOF
             $writer->writeTranslations($operation->getResult(), $input->getOption('output-format'), array('path' => $bundleTransPath, 'default_locale' => $this->getContainer()->getParameter('kernel.default_locale')));
 
             if (true === $input->getOption('dump-messages')) {
-                $resultMessage .= ' and translation files were updated.';
-            } else {
-                $resultMessage = 'Translation files were successfully updated.';
+                $resultMessage .= ' and translation files were updated';
             }
         }
 
-        $io->success($resultMessage);
+        $io->success($resultMessage.'.');
+    }
+
+    private function filterCatalogue(MessageCatalogue $catalogue, $domain)
+    {
+        $filteredCatalogue = new MessageCatalogue($catalogue->getLocale());
+
+        if ($messages = $catalogue->all($domain)) {
+            $filteredCatalogue->add($messages, $domain);
+        }
+        foreach ($catalogue->getResources() as $resource) {
+            $filteredCatalogue->addResource($resource);
+        }
+        if ($metadata = $catalogue->getMetadata('', $domain)) {
+            foreach ($metadata as $k => $v) {
+                $filteredCatalogue->setMetadata($k, $v, $domain);
+            }
+        }
+
+        return $filteredCatalogue;
     }
 }

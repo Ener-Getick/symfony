@@ -20,10 +20,11 @@ class DoctrineAdapter extends AbstractAdapter
 {
     private $provider;
 
-    public function __construct(CacheProvider $provider, $defaultLifetime = null)
+    public function __construct(CacheProvider $provider, $namespace = '', $defaultLifetime = 0)
     {
         parent::__construct('', $defaultLifetime);
         $this->provider = $provider;
+        $provider->setNamespace($namespace);
     }
 
     /**
@@ -45,9 +46,13 @@ class DoctrineAdapter extends AbstractAdapter
     /**
      * {@inheritdoc}
      */
-    protected function doClear()
+    protected function doClear($namespace)
     {
-        return $this->provider->flushAll();
+        $namespace = $this->provider->getNamespace();
+
+        return isset($namespace[0])
+            ? $this->provider->deleteAll()
+            : $this->provider->flushAll();
     }
 
     /**

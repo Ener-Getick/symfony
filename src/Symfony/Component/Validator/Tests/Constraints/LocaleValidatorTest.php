@@ -13,8 +13,9 @@ namespace Symfony\Component\Validator\Tests\Constraints;
 
 use Symfony\Component\Validator\Constraints\Locale;
 use Symfony\Component\Validator\Constraints\LocaleValidator;
+use Symfony\Component\Validator\Test\ConstraintValidatorTestCase;
 
-class LocaleValidatorTest extends AbstractConstraintValidatorTest
+class LocaleValidatorTest extends ConstraintValidatorTestCase
 {
     protected function createValidator()
     {
@@ -61,6 +62,7 @@ class LocaleValidatorTest extends AbstractConstraintValidatorTest
             array('pt'),
             array('pt_PT'),
             array('zh_Hans'),
+            array('fil_PH'),
         );
     }
 

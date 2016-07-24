@@ -18,6 +18,8 @@ use Symfony\Component\DependencyInjection\Exception\BadMethodCallException;
 use Symfony\Component\DependencyInjection\Exception\InvalidArgumentException;
 use Symfony\Component\DependencyInjection\Exception\LogicException;
 use Symfony\Component\DependencyInjection\Exception\RuntimeException;
+use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
+use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 use Symfony\Component\DependencyInjection\Extension\ExtensionInterface;
 use Symfony\Component\Config\Resource\FileResource;
 use Symfony\Component\Config\Resource\ResourceInterface;
@@ -91,6 +93,8 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      * @var string[] with tag names used by findTaggedServiceIds
      */
     private $usedTags = array();
+
+    private $compiled = false;
 
     /**
      * Sets the track resources flag.
@@ -259,7 +263,9 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
         }
 
         do {
-            $this->addResource(new FileResource($class->getFileName()));
+            if (is_file($class->getFileName())) {
+                $this->addResource(new FileResource($class->getFileName()));
+            }
         } while ($class = $class->getParentClass());
 
         return $this;
@@ -292,14 +298,22 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
     /**
      * Adds a compiler pass.
      *
-     * @param CompilerPassInterface $pass A compiler pass
-     * @param string                $type The type of compiler pass
+     * @param CompilerPassInterface $pass     A compiler pass
+     * @param string                $type     The type of compiler pass
+     * @param int                   $priority Used to sort the passes
      *
      * @return ContainerBuilder The current instance
      */
-    public function addCompilerPass(CompilerPassInterface $pass, $type = PassConfig::TYPE_BEFORE_OPTIMIZATION)
+    public function addCompilerPass(CompilerPassInterface $pass, $type = PassConfig::TYPE_BEFORE_OPTIMIZATION/**, $priority = 0*/)
     {
-        $this->getCompiler()->addPass($pass, $type);
+        // For BC
+        if (func_num_args() >= 3) {
+            $priority = func_get_arg(2);
+        } else {
+            $priority = 0;
+        }
+
+        $this->getCompiler()->addPass($pass, $type, $priority);
 
         $this->addObjectResource($pass);
 
@@ -396,14 +410,19 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      *
      * @return object The associated service
      *
-     * @throws InvalidArgumentException when no definitions are available
-     * @throws LogicException           when a circular dependency is detected
+     * @throws InvalidArgumentException          when no definitions are available
+     * @throws ServiceCircularReferenceException When a circular reference is detected
+     * @throws ServiceNotFoundException          When the service is not defined
      * @throws \Exception
      *
      * @see Reference
      */
     public function get($id, $invalidBehavior = ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE)
     {
+        if (!$this->compiled) {
+            @trigger_error(sprintf('Calling %s() before compiling the container is deprecated since version 3.2 and will throw an exception in 4.0.', __METHOD__), E_USER_DEPRECATED);
+        }
+
         $id = strtolower($id);
 
         if ($service = parent::get($id, ContainerInterface::NULL_ON_INVALID_REFERENCE)) {
@@ -416,7 +435,7 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
 
         try {
             $definition = $this->getDefinition($id);
-        } catch (InvalidArgumentException $e) {
+        } catch (ServiceNotFoundException $e) {
             if (ContainerInterface::EXCEPTION_ON_INVALID_REFERENCE !== $invalidBehavior) {
                 return;
             }
@@ -453,7 +472,7 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      * parameter, the value will still be 'bar' as defined in the ContainerBuilder
      * constructor.
      *
-     * @param ContainerBuilder $container The ContainerBuilder instance to merge.
+     * @param ContainerBuilder $container The ContainerBuilder instance to merge
      *
      * @throws BadMethodCallException When this ContainerBuilder is frozen
      */
@@ -538,12 +557,14 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
         }
 
         $compiler->compile($this);
+        $this->compiled = true;
 
-        if ($this->trackResources) {
-            foreach ($this->definitions as $definition) {
-                if ($definition->isLazy() && ($class = $definition->getClass()) && class_exists($class)) {
-                    $this->addClassResource(new \ReflectionClass($class));
-                }
+        foreach ($this->definitions as $id => $definition) {
+            if (!$definition->isPublic()) {
+                $this->privates[$id] = true;
+            }
+            if ($this->trackResources && $definition->isLazy() && ($class = $definition->getClass()) && class_exists($class)) {
+                $this->addClassResource(new \ReflectionClass($class));
             }
         }
 
@@ -756,14 +777,14 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      *
      * @return Definition A Definition instance
      *
-     * @throws InvalidArgumentException if the service definition does not exist
+     * @throws ServiceNotFoundException if the service definition does not exist
      */
     public function getDefinition($id)
     {
         $id = strtolower($id);
 
         if (!array_key_exists($id, $this->definitions)) {
-            throw new InvalidArgumentException(sprintf('The service definition "%s" does not exist.', $id));
+            throw new ServiceNotFoundException($id);
         }
 
         return $this->definitions[$id];
@@ -778,7 +799,7 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      *
      * @return Definition A Definition instance
      *
-     * @throws InvalidArgumentException if the service definition does not exist
+     * @throws ServiceNotFoundException if the service definition does not exist
      */
     public function findDefinition($id)
     {
@@ -939,7 +960,7 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      *
      * @param string $name The tag name
      *
-     * @return array An array of tags with the tagged service as key, holding a list of attribute arrays.
+     * @return array An array of tags with the tagged service as key, holding a list of attribute arrays
      */
     public function findTaggedServiceIds($name)
     {
@@ -995,7 +1016,7 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
     /**
      * Returns the Service Conditionals.
      *
-     * @param mixed $value An array of conditionals to return.
+     * @param mixed $value An array of conditionals to return
      *
      * @return array An array of Service conditionals
      */

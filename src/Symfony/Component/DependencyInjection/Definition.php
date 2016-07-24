@@ -42,8 +42,6 @@ class Definition
     protected $arguments;
 
     /**
-     * Constructor.
-     *
      * @param string|null $class     The service class
      * @param array       $arguments An array of arguments to pass to the service constructor
      */
@@ -614,13 +612,17 @@ class Definition
     /**
      * Sets a configurator to call after the service is fully initialized.
      *
-     * @param callable $callable A PHP callable
+     * @param string|array $configurator A PHP callable
      *
      * @return Definition The current instance
      */
-    public function setConfigurator($callable)
+    public function setConfigurator($configurator)
     {
-        $this->configurator = $callable;
+        if (is_string($configurator) && strpos($configurator, '::') !== false) {
+            $configurator = explode('::', $configurator, 2);
+        }
+
+        $this->configurator = $configurator;
 
         return $this;
     }

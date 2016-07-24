@@ -71,13 +71,24 @@ class ProxyDumper implements DumperInterface
             $instantiation .= " \$this->services['$id'] =";
         }
 
-        $methodName = 'get'.Container::camelize($id).'Service';
+        if (func_num_args() >= 3) {
+            $methodName = func_get_arg(2);
+        } else {
+            @trigger_error(sprintf('You must use the third argument of %s to define the method to call to construct your service since version 3.1, not using it won\'t be supported in 4.0.', __METHOD__), E_USER_DEPRECATED);
+            $methodName = 'get'.Container::camelize($id).'Service';
+        }
         $proxyClass = $this->getProxyClassName($definition);
+
+        $generatedClass = $this->generateProxyClass($definition);
+
+        $constructorCall = $generatedClass->hasMethod('staticProxyConstructor')
+            ? $proxyClass.'::staticProxyConstructor'
+            : 'new '.$proxyClass;
 
         return <<<EOF
         if (\$lazyLoad) {
 
-            $instantiation new $proxyClass(
+            $instantiation $constructorCall(
                 function (&\$wrappedInstance, \ProxyManager\Proxy\LazyLoadingInterface \$proxy) {
                     \$wrappedInstance = \$this->$methodName(false);
 
@@ -97,11 +108,7 @@ EOF;
      */
     public function getProxyCode(Definition $definition)
     {
-        $generatedClass = new ClassGenerator($this->getProxyClassName($definition));
-
-        $this->proxyGenerator->generate(new \ReflectionClass($definition->getClass()), $generatedClass);
-
-        return $this->classGenerator->generate($generatedClass);
+        return $this->classGenerator->generate($this->generateProxyClass($definition));
     }
 
     /**
@@ -114,5 +121,17 @@ EOF;
     private function getProxyClassName(Definition $definition)
     {
         return str_replace('\\', '', $definition->getClass()).'_'.spl_object_hash($definition).$this->salt;
+    }
+
+    /**
+     * @return ClassGenerator
+     */
+    private function generateProxyClass(Definition $definition)
+    {
+        $generatedClass = new ClassGenerator($this->getProxyClassName($definition));
+
+        $this->proxyGenerator->generate(new \ReflectionClass($definition->getClass()), $generatedClass);
+
+        return $generatedClass;
     }
 }

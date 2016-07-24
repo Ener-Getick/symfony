@@ -9,7 +9,7 @@
  * file that was distributed with this source code.
  */
 
-namespace Symfony\Component\PropertyInfo\PropertyInfo\Tests\Extractors;
+namespace Symfony\Component\PropertyInfo\Tests\Extractors;
 
 use Doctrine\Common\Annotations\AnnotationReader;
 use Symfony\Component\PropertyInfo\Extractor\SerializerExtractor;
@@ -26,7 +26,7 @@ class SerializerExtractorTest extends \PHPUnit_Framework_TestCase
      */
     private $extractor;
 
-    public function setUp()
+    protected function setUp()
     {
         $classMetadataFactory = new ClassMetadataFactory(new AnnotationLoader(new AnnotationReader()));
         $this->extractor = new SerializerExtractor($classMetadataFactory);

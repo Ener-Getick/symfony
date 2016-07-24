@@ -31,6 +31,7 @@ use Symfony\Component\Form\FormView;
 use Symfony\Component\Form\Extension\Core\EventListener\MergeCollectionListener;
 use Symfony\Component\Form\Extension\Core\DataTransformer\ChoiceToValueTransformer;
 use Symfony\Component\Form\Extension\Core\DataTransformer\ChoicesToValuesTransformer;
+use Symfony\Component\Form\Util\FormUtil;
 use Symfony\Component\OptionsResolver\Options;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
@@ -61,9 +62,7 @@ class ChoiceType extends AbstractType
         $builder->setAttribute('choice_list', $choiceList);
 
         if ($options['expanded']) {
-            $builder->setDataMapper($options['multiple']
-                ? new CheckboxListMapper($choiceList)
-                : new RadioListMapper($choiceList));
+            $builder->setDataMapper($options['multiple'] ? new CheckboxListMapper() : new RadioListMapper());
 
             // Initialize all choices before doing the index check below.
             // This helps in cases where index checks are optimized for non
@@ -92,6 +91,14 @@ class ChoiceType extends AbstractType
             $builder->addEventListener(FormEvents::PRE_SUBMIT, function (FormEvent $event) {
                 $form = $event->getForm();
                 $data = $event->getData();
+
+                if (null === $data) {
+                    $emptyData = $form->getConfig()->getEmptyData();
+
+                    if (false === FormUtil::isEmpty($emptyData) && array() !== $emptyData) {
+                        $data = is_callable($emptyData) ? call_user_func($emptyData, $form, $data) : $emptyData;
+                    }
+                }
 
                 // Convert the submitted data to a string, if scalar, before
                 // casting it to an array
@@ -134,22 +141,13 @@ class ChoiceType extends AbstractType
 
                 $event->setData($data);
             });
+        }
 
-            if (!$options['multiple']) {
-                // For radio lists, transform empty arrays to null
-                // This is kind of a hack necessary because the RadioListMapper
-                // is not invoked for forms without choices
-                $builder->addEventListener(FormEvents::SUBMIT, function (FormEvent $event) {
-                    if (array() === $event->getData()) {
-                        $event->setData(null);
-                    }
-                });
-            }
-        } elseif ($options['multiple']) {
-            // <select> tag with "multiple" option
+        if ($options['multiple']) {
+            // <select> tag with "multiple" option or list of checkbox inputs
             $builder->addViewTransformer(new ChoicesToValuesTransformer($choiceList));
         } else {
-            // <select> tag without "multiple" option
+            // <select> tag without "multiple" option or list of radio inputs
             $builder->addViewTransformer(new ChoiceToValueTransformer($choiceList));
         }
 
@@ -203,15 +201,12 @@ class ChoiceType extends AbstractType
         }
 
         // Check if the choices already contain the empty value
-        $view->vars['placeholder_in_choices'] = 0 !== count($choiceList->getChoicesForValues(array('')));
+        $view->vars['placeholder_in_choices'] = $choiceListView->hasPlaceholder();
 
         // Only add the empty value option if this is not the case
         if (null !== $options['placeholder'] && !$view->vars['placeholder_in_choices']) {
             $view->vars['placeholder'] = $options['placeholder'];
         }
-
-        // BC
-        $view->vars['empty_value_in_choices'] = $view->vars['placeholder_in_choices'];
 
         if ($options['multiple'] && !$options['expanded']) {
             // Add "[]" to the name in case a select tag with multiple options is
@@ -247,7 +242,11 @@ class ChoiceType extends AbstractType
     public function configureOptions(OptionsResolver $resolver)
     {
         $emptyData = function (Options $options) {
-            if ($options['multiple'] || $options['expanded']) {
+            if ($options['expanded'] && !$options['multiple']) {
+                return;
+            }
+
+            if ($options['multiple']) {
                 return array();
             }
 
@@ -277,6 +276,9 @@ class ChoiceType extends AbstractType
         $placeholderNormalizer = function (Options $options, $placeholder) {
             if ($options['multiple']) {
                 // never use an empty value for this case
+                return;
+            } elseif ($options['required'] && ($options['expanded'] || isset($options['attr']['size']) && $options['attr']['size'] > 1)) {
+                // placeholder for required radio buttons or a select with size > 1 does not make sense
                 return;
             } elseif (false === $placeholder) {
                 // an empty value should be added but the user decided otherwise
@@ -332,12 +334,12 @@ class ChoiceType extends AbstractType
         $resolver->setAllowedTypes('choices', array('null', 'array', '\Traversable'));
         $resolver->setAllowedTypes('choice_translation_domain', array('null', 'bool', 'string'));
         $resolver->setAllowedTypes('choice_loader', array('null', 'Symfony\Component\Form\ChoiceList\Loader\ChoiceLoaderInterface'));
-        $resolver->setAllowedTypes('choice_label', array('null', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
+        $resolver->setAllowedTypes('choice_label', array('null', 'bool', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
         $resolver->setAllowedTypes('choice_name', array('null', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
         $resolver->setAllowedTypes('choice_value', array('null', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
         $resolver->setAllowedTypes('choice_attr', array('null', 'array', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
         $resolver->setAllowedTypes('preferred_choices', array('array', '\Traversable', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
-        $resolver->setAllowedTypes('group_by', array('null', 'array', '\Traversable', 'string', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
+        $resolver->setAllowedTypes('group_by', array('null', 'callable', 'string', 'Symfony\Component\PropertyAccess\PropertyPath'));
     }
 
     /**
@@ -348,27 +350,12 @@ class ChoiceType extends AbstractType
         return 'choice';
     }
 
-    private static function flipRecursive($choices, &$output = array())
-    {
-        foreach ($choices as $key => $value) {
-            if (is_array($value)) {
-                $output[$key] = array();
-                self::flipRecursive($value, $output[$key]);
-                continue;
-            }
-
-            $output[$value] = $key;
-        }
-
-        return $output;
-    }
-
     /**
      * Adds the sub fields for an expanded choice field.
      *
-     * @param FormBuilderInterface $builder     The form builder.
-     * @param array                $choiceViews The choice view objects.
-     * @param array                $options     The build options.
+     * @param FormBuilderInterface $builder     The form builder
+     * @param array                $choiceViews The choice view objects
+     * @param array                $options     The build options
      */
     private function addSubForms(FormBuilderInterface $builder, array $choiceViews, array $options)
     {
@@ -435,14 +422,6 @@ class ChoiceType extends AbstractType
 
     private function createChoiceListView(ChoiceListInterface $choiceList, array $options)
     {
-        // If no explicit grouping information is given, use the structural
-        // information from the "choices" option for creating groups
-        if (!$options['group_by'] && $options['choices']) {
-            $options['group_by'] = !$options['choices_as_values']
-                ? self::flipRecursive($options['choices'])
-                : $options['choices'];
-        }
-
         return $this->choiceListFactory->createView(
             $choiceList,
             $options['preferred_choices'],

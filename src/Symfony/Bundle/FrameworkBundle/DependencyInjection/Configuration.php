@@ -43,6 +43,14 @@ class Configuration implements ConfigurationInterface
         $rootNode = $treeBuilder->root('framework');
 
         $rootNode
+            ->beforeNormalization()
+                ->ifTrue(function ($v) { return !isset($v['assets']) && isset($v['templating']); })
+                ->then(function ($v) {
+                    $v['assets'] = array();
+
+                    return $v;
+                })
+            ->end()
             ->children()
                 ->scalarNode('secret')->end()
                 ->scalarNode('http_method_override')
@@ -62,6 +70,10 @@ class Configuration implements ConfigurationInterface
                                 }
 
                                 if (false !== strpos($v, '/')) {
+                                    if ('0.0.0.0/0' === $v) {
+                                        return false;
+                                    }
+
                                     list($v, $mask) = explode('/', $v, 2);
 
                                     if (strcmp($mask, (int) $mask) || $mask < 1 || $mask > (false !== strpos($v, ':') ? 128 : 32)) {
@@ -91,6 +103,7 @@ class Configuration implements ConfigurationInterface
         $this->addSsiSection($rootNode);
         $this->addFragmentsSection($rootNode);
         $this->addProfilerSection($rootNode);
+        $this->addWorkflowSection($rootNode);
         $this->addRouterSection($rootNode);
         $this->addSessionSection($rootNode);
         $this->addRequestSection($rootNode);
@@ -102,6 +115,7 @@ class Configuration implements ConfigurationInterface
         $this->addSerializerSection($rootNode);
         $this->addPropertyAccessSection($rootNode);
         $this->addPropertyInfoSection($rootNode);
+        $this->addCacheSection($rootNode);
 
         return $treeBuilder;
     }
@@ -192,7 +206,7 @@ class Configuration implements ConfigurationInterface
                         ->booleanNode('only_master_requests')->defaultFalse()->end()
                         ->scalarNode('dsn')->defaultValue('file:%kernel.cache_dir%/profiler')->end()
                         ->arrayNode('matcher')
-                            ->canBeUnset()
+                            ->canBeEnabled()
                             ->performNoDeepMerging()
                             ->fixXmlConfig('ip')
                             ->children()
@@ -213,13 +227,106 @@ class Configuration implements ConfigurationInterface
         ;
     }
 
+    private function addWorkflowSection(ArrayNodeDefinition $rootNode)
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('workflows')
+                    ->useAttributeAsKey('name')
+                    ->prototype('array')
+                        ->children()
+                            ->arrayNode('marking_store')
+                                ->isRequired()
+                                ->children()
+                                    ->enumNode('type')
+                                        ->values(array('property_accessor', 'scalar'))
+                                    ->end()
+                                    ->arrayNode('arguments')
+                                        ->beforeNormalization()
+                                            ->ifString()
+                                            ->then(function ($v) { return array($v); })
+                                        ->end()
+                                        ->prototype('scalar')
+                                        ->end()
+                                    ->end()
+                                    ->scalarNode('service')
+                                        ->cannotBeEmpty()
+                                    ->end()
+                                ->end()
+                                ->validate()
+                                    ->always(function ($v) {
+                                        if (isset($v['type']) && isset($v['service'])) {
+                                            throw new \InvalidArgumentException('"type" and "service" could not be used together.');
+                                        }
+
+                                        return $v;
+                                    })
+                                ->end()
+                            ->end()
+                            ->arrayNode('supports')
+                                ->isRequired()
+                                ->beforeNormalization()
+                                    ->ifString()
+                                    ->then(function ($v) { return array($v); })
+                                ->end()
+                                ->prototype('scalar')
+                                    ->cannotBeEmpty()
+                                    ->validate()
+                                        ->ifTrue(function ($v) { return !class_exists($v); })
+                                        ->thenInvalid('The supported class %s does not exist.')
+                                    ->end()
+                                ->end()
+                            ->end()
+                            ->arrayNode('places')
+                                ->isRequired()
+                                ->requiresAtLeastOneElement()
+                                ->prototype('scalar')
+                                    ->cannotBeEmpty()
+                                ->end()
+                            ->end()
+                            ->arrayNode('transitions')
+                                ->useAttributeAsKey('name')
+                                ->isRequired()
+                                ->requiresAtLeastOneElement()
+                                ->prototype('array')
+                                    ->children()
+                                        ->arrayNode('from')
+                                            ->beforeNormalization()
+                                                ->ifString()
+                                                ->then(function ($v) { return array($v); })
+                                            ->end()
+                                            ->requiresAtLeastOneElement()
+                                            ->prototype('scalar')
+                                                ->cannotBeEmpty()
+                                            ->end()
+                                        ->end()
+                                        ->arrayNode('to')
+                                            ->beforeNormalization()
+                                                ->ifString()
+                                                ->then(function ($v) { return array($v); })
+                                            ->end()
+                                            ->requiresAtLeastOneElement()
+                                            ->prototype('scalar')
+                                                ->cannotBeEmpty()
+                                            ->end()
+                                        ->end()
+                                    ->end()
+                                ->end()
+                            ->end()
+                        ->end()
+                    ->end()
+                ->end()
+            ->end()
+        ;
+    }
+
     private function addRouterSection(ArrayNodeDefinition $rootNode)
     {
         $rootNode
             ->children()
                 ->arrayNode('router')
                     ->info('router configuration')
-                    ->canBeUnset()
+                    ->canBeEnabled()
                     ->children()
                         ->scalarNode('resource')->isRequired()->end()
                         ->scalarNode('type')->end()
@@ -246,7 +353,7 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->arrayNode('session')
                     ->info('session configuration')
-                    ->canBeUnset()
+                    ->canBeEnabled()
                     ->children()
                         ->scalarNode('storage_id')->defaultValue('session.storage.native')->end()
                         ->scalarNode('handler_id')->defaultValue('session.handler.native_file')->end()
@@ -277,7 +384,7 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->arrayNode('request')
                     ->info('request configuration')
-                    ->canBeUnset()
+                    ->canBeEnabled()
                     ->fixXmlConfig('format')
                     ->children()
                         ->arrayNode('formats')
@@ -306,7 +413,11 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->arrayNode('templating')
                     ->info('templating configuration')
-                    ->canBeUnset()
+                    ->canBeEnabled()
+                    ->beforeNormalization()
+                        ->ifTrue(function ($v) { return false === $v || is_array($v) && false === $v['enabled']; })
+                        ->then(function () { return array('enabled' => false, 'engines' => false); })
+                    ->end()
                     ->children()
                         ->scalarNode('hinclude_default_template')->defaultNull()->end()
                         ->scalarNode('cache')->end()
@@ -333,8 +444,9 @@ class Configuration implements ConfigurationInterface
                             ->example(array('twig'))
                             ->isRequired()
                             ->requiresAtLeastOneElement()
+                            ->canBeUnset()
                             ->beforeNormalization()
-                                ->ifTrue(function ($v) { return !is_array($v); })
+                                ->ifTrue(function ($v) { return !is_array($v) && false !== $v; })
                                 ->then(function ($v) { return array($v); })
                             ->end()
                             ->prototype('scalar')->end()
@@ -361,9 +473,10 @@ class Configuration implements ConfigurationInterface
             ->children()
                 ->arrayNode('assets')
                     ->info('assets configuration')
-                    ->canBeUnset()
+                    ->canBeEnabled()
                     ->fixXmlConfig('base_url')
                     ->children()
+                        ->scalarNode('version_strategy')->defaultNull()->end()
                         ->scalarNode('version')->defaultNull()->end()
                         ->scalarNode('version_format')->defaultValue('%%s?%%s')->end()
                         ->scalarNode('base_path')->defaultValue('')->end()
@@ -376,6 +489,12 @@ class Configuration implements ConfigurationInterface
                             ->prototype('scalar')->end()
                         ->end()
                     ->end()
+                    ->validate()
+                        ->ifTrue(function ($v) {
+                            return isset($v['version_strategy']) && isset($v['version']);
+                        })
+                        ->thenInvalid('You cannot use both "version_strategy" and "version" at the same time under "assets".')
+                    ->end()
                     ->fixXmlConfig('package')
                     ->children()
                         ->arrayNode('packages')
@@ -383,7 +502,13 @@ class Configuration implements ConfigurationInterface
                             ->prototype('array')
                                 ->fixXmlConfig('base_url')
                                 ->children()
-                                    ->scalarNode('version')->defaultNull()->end()
+                                    ->scalarNode('version_strategy')->defaultNull()->end()
+                                    ->scalarNode('version')
+                                        ->beforeNormalization()
+                                        ->ifTrue(function ($v) { return '' === $v; })
+                                        ->then(function ($v) { return; })
+                                        ->end()
+                                    ->end()
                                     ->scalarNode('version_format')->defaultNull()->end()
                                     ->scalarNode('base_path')->defaultValue('')->end()
                                     ->arrayNode('base_urls')
@@ -394,6 +519,12 @@ class Configuration implements ConfigurationInterface
                                         ->end()
                                         ->prototype('scalar')->end()
                                     ->end()
+                                ->end()
+                                ->validate()
+                                    ->ifTrue(function ($v) {
+                                        return isset($v['version_strategy']) && isset($v['version']);
+                                    })
+                                    ->thenInvalid('You cannot use both "version_strategy" and "version" at the same time under "assets" packages.')
                                 ->end()
                             ->end()
                         ->end()
@@ -436,20 +567,7 @@ class Configuration implements ConfigurationInterface
                     ->info('validation configuration')
                     ->canBeEnabled()
                     ->children()
-                        ->scalarNode('cache')
-                            ->beforeNormalization()
-                                // Can be removed in 3.0, once ApcCache support is dropped
-                                ->ifString()->then(function ($v) {
-                                    if ('apc' === $v) {
-                                        @trigger_error('The ability to pass "apc" as the framework.validation.cache configuration key value is deprecated since version 2.8 and will be removed in 3.0. Use the "validator.mapping.cache.doctrine.apc" service id instead.', E_USER_DEPRECATED);
-
-                                        return 'validator.mapping.cache.apc';
-                                    }
-
-                                    return $v;
-                                })
-                            ->end()
-                        ->end()
+                        ->scalarNode('cache')->defaultValue('validator.mapping.cache.symfony')->end()
                         ->booleanNode('enable_annotations')->defaultFalse()->end()
                         ->arrayNode('static_method')
                             ->defaultValue(array('loadValidatorMetadata'))
@@ -478,7 +596,7 @@ class Configuration implements ConfigurationInterface
                     ->children()
                         ->scalarNode('cache')->defaultValue('file')->end()
                         ->scalarNode('file_cache_dir')->defaultValue('%kernel.cache_dir%/annotations')->end()
-                        ->booleanNode('debug')->defaultValue('%kernel.debug%')->end()
+                        ->booleanNode('debug')->defaultValue($this->debug)->end()
                     ->end()
                 ->end()
             ->end()
@@ -525,6 +643,51 @@ class Configuration implements ConfigurationInterface
                 ->arrayNode('property_info')
                     ->info('Property info configuration')
                     ->canBeEnabled()
+                ->end()
+            ->end()
+        ;
+    }
+
+    private function addCacheSection(ArrayNodeDefinition $rootNode)
+    {
+        $rootNode
+            ->children()
+                ->arrayNode('cache')
+                    ->info('Cache configuration')
+                    ->addDefaultsIfNotSet()
+                    ->fixXmlConfig('pool')
+                    ->children()
+                        ->scalarNode('app')
+                            ->info('App related cache pools configuration')
+                            ->defaultValue('cache.adapter.filesystem')
+                        ->end()
+                        ->scalarNode('system')
+                            ->info('System related cache pools configuration')
+                            ->defaultValue('cache.adapter.system')
+                        ->end()
+                        ->scalarNode('directory')->defaultValue('%kernel.cache_dir%/pools')->end()
+                        ->scalarNode('default_doctrine_provider')->end()
+                        ->scalarNode('default_psr6_provider')->end()
+                        ->scalarNode('default_redis_provider')->defaultValue('redis://localhost')->end()
+                        ->arrayNode('pools')
+                            ->useAttributeAsKey('name')
+                            ->prototype('array')
+                                ->children()
+                                    ->scalarNode('adapter')->defaultValue('cache.app')->end()
+                                    ->booleanNode('public')->defaultFalse()->end()
+                                    ->integerNode('default_lifetime')->end()
+                                    ->scalarNode('provider')
+                                        ->info('The service name to use as provider when the specified adapter needs one.')
+                                    ->end()
+                                    ->scalarNode('clearer')->defaultValue('cache.default_clearer')->end()
+                                ->end()
+                            ->end()
+                            ->validate()
+                                ->ifTrue(function ($v) { return isset($v['cache.app']) || isset($v['cache.system']); })
+                                ->thenInvalid('"cache.app" and "cache.system" are reserved names')
+                            ->end()
+                        ->end()
+                    ->end()
                 ->end()
             ->end()
         ;

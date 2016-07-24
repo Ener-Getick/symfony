@@ -1,10 +1,22 @@
 CHANGELOG
 =========
 
+3.2.0
+-----
+
+ * added `CallbackChoiceLoader`
+ * implemented `ChoiceLoaderInterface` in children of `ChoiceType`
+
 3.1.0
 -----
 
  * deprecated the "choices_as_values" option of ChoiceType
+ * deprecated support for data objects that implements both `Traversable` and
+   `ArrayAccess` in `ResizeFormListener::preSubmit` method
+ * Using callable strings as choice options in `ChoiceType` has been deprecated
+   and will be used as `PropertyPath` instead of callable in Symfony 4.0.
+ * implemented `DataTransformerInterface` in `TextType`
+ * deprecated caching loaded choice list in `LazyChoiceList::$loadedList`
 
 3.0.0
 -----
@@ -88,7 +100,7 @@ CHANGELOG
 
  * moved CSRF implementation to the new Security CSRF sub-component
  * deprecated CsrfProviderInterface and its implementations
- * deprecated options "csrf_provider" and "intention" in favor of the new options "csrf_token_generator" and "csrf_token_id"
+ * deprecated options "csrf_provider" and "intention" in favor of the new options "csrf_token_manager" and "csrf_token_id"
 
 2.3.0
 -----

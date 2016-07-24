@@ -21,6 +21,7 @@ class ArrayAdapterTest extends CachePoolTest
 {
     protected $skippedTests = array(
         'testDeferredSaveWithoutCommit' => 'Assumes a shared cache which ArrayAdapter is not.',
+        'testSaveWithoutExpire' => 'Assumes a shared cache which ArrayAdapter is not.',
     );
 
     public function createCachePool()

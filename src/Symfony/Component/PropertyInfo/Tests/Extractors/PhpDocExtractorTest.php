@@ -24,7 +24,7 @@ class PhpDocExtractorTest extends \PHPUnit_Framework_TestCase
      */
     private $extractor;
 
-    public function setUp()
+    protected function setUp()
     {
         $this->extractor = new PhpDocExtractor();
     }
@@ -43,7 +43,7 @@ class PhpDocExtractorTest extends \PHPUnit_Framework_TestCase
     {
         return array(
             array('foo', null, 'Short description.', 'Long description.'),
-            array('bar', array(new Type(Type::BUILTIN_TYPE_STRING)), 'This is bar.', null),
+            array('bar', array(new Type(Type::BUILTIN_TYPE_STRING)), 'This is bar', null),
             array('baz', array(new Type(Type::BUILTIN_TYPE_INT)), 'Should be used.', null),
             array('foo2', array(new Type(Type::BUILTIN_TYPE_FLOAT)), null, null),
             array('foo3', array(new Type(Type::BUILTIN_TYPE_CALLABLE)), null, null),
@@ -70,4 +70,14 @@ class PhpDocExtractorTest extends \PHPUnit_Framework_TestCase
             array('donotexist', null, null, null),
         );
     }
+
+    public function testReturnNullOnEmptyDocBlock()
+    {
+        $this->assertNull($this->extractor->getShortDescription(EmptyDocBlock::class, 'foo'));
+    }
+}
+
+class EmptyDocBlock
+{
+    public $foo;
 }

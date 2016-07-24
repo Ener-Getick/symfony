@@ -11,8 +11,6 @@
 
 namespace Symfony\Component\Serializer\Normalizer;
 
-use Symfony\Component\Serializer\Exception\RuntimeException;
-
 /**
  * Converts between objects with getter and setter methods and arrays.
  *
@@ -36,6 +34,8 @@ use Symfony\Component\Serializer\Exception\RuntimeException;
  */
 class GetSetMethodNormalizer extends AbstractObjectNormalizer
 {
+    private static $setterAccessibleCache = array();
+
     /**
      * {@inheritdoc}
      *
@@ -47,7 +47,7 @@ class GetSetMethodNormalizer extends AbstractObjectNormalizer
         $normalizedData = $this->prepareForDenormalization($data);
 
         $reflectionClass = new \ReflectionClass($class);
-        $object = $this->instantiateObject($normalizedData, $class, $context, $reflectionClass, $allowedAttributes);
+        $object = $this->instantiateObject($normalizedData, $class, $context, $reflectionClass, $allowedAttributes, $format);
 
         $classMethods = get_class_methods($object);
         foreach ($normalizedData as $attribute => $value) {
@@ -111,7 +111,7 @@ class GetSetMethodNormalizer extends AbstractObjectNormalizer
      *
      * @param \ReflectionMethod $method the method to check
      *
-     * @return bool whether the method is a getter or boolean getter.
+     * @return bool whether the method is a getter or boolean getter
      */
     private function isGetMethod(\ReflectionMethod $method)
     {
@@ -175,8 +175,13 @@ class GetSetMethodNormalizer extends AbstractObjectNormalizer
     protected function setAttributeValue($object, $attribute, $value, $format = null, array $context = array())
     {
         $setter = 'set'.ucfirst($attribute);
+        $key = get_class($object).':'.$setter;
 
-        if (is_callable(array($object, $setter))) {
+        if (!isset(self::$setterAccessibleCache[$key])) {
+            self::$setterAccessibleCache[$key] = is_callable(array($object, $setter)) && !(new \ReflectionMethod($object, $setter))->isStatic();
+        }
+
+        if (self::$setterAccessibleCache[$key]) {
             $object->$setter($value);
         }
     }

@@ -14,6 +14,7 @@ namespace Symfony\Component\Serializer\Normalizer;
 use Symfony\Component\PropertyAccess\Exception\NoSuchPropertyException;
 use Symfony\Component\PropertyAccess\PropertyAccess;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
+use Symfony\Component\PropertyInfo\PropertyTypeExtractorInterface;
 use Symfony\Component\Serializer\Mapping\Factory\ClassMetadataFactoryInterface;
 use Symfony\Component\Serializer\NameConverter\NameConverterInterface;
 
@@ -29,9 +30,9 @@ class ObjectNormalizer extends AbstractObjectNormalizer
      */
     protected $propertyAccessor;
 
-    public function __construct(ClassMetadataFactoryInterface $classMetadataFactory = null, NameConverterInterface $nameConverter = null, PropertyAccessorInterface $propertyAccessor = null)
+    public function __construct(ClassMetadataFactoryInterface $classMetadataFactory = null, NameConverterInterface $nameConverter = null, PropertyAccessorInterface $propertyAccessor = null, PropertyTypeExtractorInterface $propertyTypeExtractor = null)
     {
-        parent::__construct($classMetadataFactory, $nameConverter);
+        parent::__construct($classMetadataFactory, $nameConverter, $propertyTypeExtractor);
 
         $this->propertyAccessor = $propertyAccessor ?: PropertyAccess::createPropertyAccessor();
     }
@@ -57,6 +58,7 @@ class ObjectNormalizer extends AbstractObjectNormalizer
             }
 
             $name = $reflMethod->name;
+            $attributeName = null;
 
             if (0 === strpos($name, 'get') || 0 === strpos($name, 'has')) {
                 // getters and hassers
@@ -66,14 +68,14 @@ class ObjectNormalizer extends AbstractObjectNormalizer
                 $attributeName = lcfirst(substr($name, 2));
             }
 
-            if ($this->isAllowedAttribute($object, $attributeName)) {
+            if (null !== $attributeName && $this->isAllowedAttribute($object, $attributeName, $format, $context)) {
                 $attributes[$attributeName] = true;
             }
         }
 
         // properties
         foreach ($reflClass->getProperties(\ReflectionProperty::IS_PUBLIC) as $reflProperty) {
-            if ($reflProperty->isStatic() || !$this->isAllowedAttribute($object, $reflProperty->name)) {
+            if ($reflProperty->isStatic() || !$this->isAllowedAttribute($object, $reflProperty->name, $format, $context)) {
                 continue;
             }
 

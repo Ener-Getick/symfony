@@ -234,13 +234,13 @@ UPGRADE FROM 2.x to 3.0
 ### Form
 
  * The `getBlockPrefix()` method was added to the `FormTypeInterface` in replacement of
-   the `getName()` method which has been has been removed.
+   the `getName()` method which has been removed.
 
  * The `configureOptions()` method was added to the `FormTypeInterface` in replacement
    of the `setDefaultOptions()` method which has been removed.
 
  * The `getBlockPrefix()` method was added to the `ResolvedFormTypeInterface` in
-   replacement of the `getName()` method which has been has been removed.
+   replacement of the `getName()` method which has been removed.
 
  * The option `options` of the `CollectionType` has been removed in favor
    of the `entry_options` option.
@@ -398,12 +398,14 @@ UPGRADE FROM 2.x to 3.0
    </service>
    ```
 
- *  The `ChoiceToBooleanArrayTransformer`, `ChoicesToBooleanArrayTransformer`,
-    `FixRadioInputListener`, and `FixCheckboxInputListener` classes were removed.
+ * The `max_length` option was removed. Use the `attr` option instead by setting it to
+   an `array` with a `maxlength` key.
+
+ * The `ChoiceToBooleanArrayTransformer`, `ChoicesToBooleanArrayTransformer`,
+   `FixRadioInputListener`, and `FixCheckboxInputListener` classes were removed.
 
  * The `choice_list` option of `ChoiceType` was removed.
 
->>>>>>> 2.8
  * The option "precision" was renamed to "scale".
 
    Before:
@@ -637,6 +639,11 @@ UPGRADE FROM 2.x to 3.0
    be removed in Symfony 3.0. Use the `debug:config`, `debug:container`,
    `debug:router`, `debug:translation` and `lint:yaml` commands instead.
 
+ * The base `Controller`class is now abstract.
+
+ * The visibility of all methods of the base `Controller` class has been changed from
+   `public` to `protected`.
+
  * The `getRequest` method of the base `Controller` class has been deprecated
    since Symfony 2.4 and must be therefore removed in 3.0. The only reliable
    way to get the `Request` object is to inject it in the action method.
@@ -781,7 +788,7 @@ UPGRADE FROM 2.x to 3.0
    The `security.csrf.token_manager` should be used instead.
 
  * The `validator.mapping.cache.apc` service has been removed in favor of the `validator.mapping.cache.doctrine.apc` one.
-   
+
  * The ability to pass `apc` as the `framework.validation.cache` configuration key value has been removed.
    Use `validator.mapping.cache.doctrine.apc` instead:
 
@@ -932,6 +939,30 @@ UPGRADE FROM 2.x to 3.0
  * The `getMatcherDumperInstance()` and `getGeneratorDumperInstance()` methods in the
    `Symfony\Component\Routing\Router` have been changed from `public` to `protected`.
 
+ * Use the constants defined in the UrlGeneratorInterface for the $referenceType argument of the UrlGeneratorInterface::generate method.
+
+   Before:
+
+   ```php
+   // url generated in controller
+   $this->generateUrl('blog_show', array('slug' => 'my-blog-post'), true);
+
+   // url generated in @router service
+   $router->generate('blog_show', array('slug' => 'my-blog-post'), true);
+   ```
+
+   After:
+
+   ```php
+   use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+
+   // url generated in controller
+   $this->generateUrl('blog_show', array('slug' => 'my-blog-post'), UrlGeneratorInterface::ABSOLUTE_URL);
+
+   // url generated in @router service
+   $router->generate('blog_show', array('slug' => 'my-blog-post'), UrlGeneratorInterface::ABSOLUTE_URL);
+   ```
+
 ### Security
 
  * The `vote()` method from the `VoterInterface` was changed to now accept arbitrary
@@ -939,9 +970,6 @@ UPGRADE FROM 2.x to 3.0
    in 2.8 to ease integrating your own voters.
 
  * The `AbstractVoter` class was removed in favor of the new `Voter` class.
-
- * The `VoterInterface::supportsClass` and `supportsAttribute` methods were
-   removed from the interface.
 
  * The `Resources/` directory was moved to `Core/Resources/`
 
@@ -1034,8 +1062,15 @@ UPGRADE FROM 2.x to 3.0
    ));
   ```
 
- * The `AbstractVoter::getSupportedAttributes()` and `AbstractVoter::getSupportedClasses()`
-   methods have been removed in favor of `AbstractVoter::supports()`.
+ * The `AbstractVoter` class was removed. Instead, extend the new `Voter` class,
+   introduced in 2.8, and move your voting logic to the to the `supports($attribute, $subject)`
+   and `voteOnAttribute($attribute, $object, TokenInterface $token)` methods.
+
+ * The `vote()` method from the `VoterInterface` was changed to now accept arbitrary
+   types, and not only objects.
+
+ * The `supportsClass` and `supportsAttribute` methods were
+   removed from the `VoterInterface` interface.
 
    Before:
 
@@ -1059,18 +1094,23 @@ UPGRADE FROM 2.x to 3.0
    After:
 
    ```php
-   class MyVoter extends AbstractVoter
+   use Symfony\Component\Security\Core\Authorization\Voter\Voter;
+
+   class MyVoter extends Voter
    {
        protected function supports($attribute, $object)
        {
            return $object instanceof Post && in_array($attribute, array('CREATE', 'EDIT'));
        }
 
-       // ...
+       protected function voteOnAttribute($attribute, $object, TokenInterface $token)
+       {
+           // Return true or false
+       }
    }
    ```
 
- * The `AbstractVoter::isGranted()` method have been replaced by `AbstractVoter::voteOnAttribute()`.
+ * The `AbstractVoter::isGranted()` method has been replaced by `Voter::voteOnAttribute()`.
 
    Before:
 
@@ -1089,7 +1129,7 @@ UPGRADE FROM 2.x to 3.0
    After:
 
    ```php
-   class MyVoter extends AbstractVoter
+   class MyVoter extends Voter
    {
        protected function voteOnAttribute($attribute, $object, TokenInterface $token)
        {
@@ -1100,8 +1140,18 @@ UPGRADE FROM 2.x to 3.0
    }
    ```
 
- * The `supportsAttribute()` and `supportsClass()` methods of classes `AuthenticatedVoter`, `ExpressionVoter`
-   and `RoleVoter` have been removed.
+ * The `supportsAttribute()` and `supportsClass()` methods of the `AuthenticatedVoter`, `ExpressionVoter`,
+   and `RoleVoter` classes have been removed.
+
+ * The `intention` option was renamed to `csrf_token_id` for all the authentication listeners.
+
+ * The `csrf_provider` option was renamed to `csrf_token_generator` for all the authentication listeners.
+
+### SecurityBundle
+
+ * The `intention` firewall listener setting was renamed to `csrf_token_id`.
+
+ * The `csrf_provider` firewall listener setting was renamed to `csrf_token_generator`.
 
 ### Serializer
 
@@ -1722,8 +1772,7 @@ UPGRADE FROM 2.x to 3.0
 
 ### WebProfiler
 
- * The `profiler:import` and `profiler:export` commands have been deprecated and
-   will be removed in 3.0.
+ * The `profiler:import` and `profiler:export` commands have been removed.
 
  * All the profiler storages different than `FileProfilerStorage` have been
    removed. The removed classes are:
@@ -1756,4 +1805,19 @@ UPGRADE FROM 2.x to 3.0
 
 ### HttpFoundation
 
-* `Symfony\Component\HttpFoundation\Session\Flash\FlashBagInterface` no longer implements the `IteratorAggregate` interface. Use the `all()` method instead of iterating over the flash bag.
+ * `Symfony\Component\HttpFoundation\Session\Flash\FlashBagInterface` no longer implements the `IteratorAggregate` interface. Use the `all()` method instead of iterating over the flash bag.
+
+ * Removed the feature that allowed finding deep items in `ParameterBag::get()`.
+   This may affect you when getting parameters from the `Request` class:
+
+   Before:
+
+   ```php
+   $request->query->get('foo[bar]', null, true);
+   ```
+
+   After:
+
+   ```php
+   $request->query->get('foo')[bar];
+   ```

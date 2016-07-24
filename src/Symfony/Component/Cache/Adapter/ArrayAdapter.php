@@ -12,21 +12,29 @@
 namespace Symfony\Component\Cache\Adapter;
 
 use Psr\Cache\CacheItemInterface;
-use Psr\Cache\CacheItemPoolInterface;
+use Psr\Log\LoggerAwareInterface;
+use Psr\Log\LoggerAwareTrait;
 use Symfony\Component\Cache\CacheItem;
-use Symfony\Component\Cache\Exception\InvalidArgumentException;
 
 /**
  * @author Nicolas Grekas <p@tchwork.com>
  */
-class ArrayAdapter implements CacheItemPoolInterface
+class ArrayAdapter implements AdapterInterface, LoggerAwareInterface
 {
+    use LoggerAwareTrait;
+
+    private $storeSerialized;
     private $values = array();
     private $expiries = array();
     private $createCacheItem;
 
-    public function __construct($defaultLifetime = 0)
+    /**
+     * @param int  $defaultLifetime
+     * @param bool $storeSerialized Disabling serialization can lead to cache corruptions when storing mutable values but increases performance otherwise
+     */
+    public function __construct($defaultLifetime = 0, $storeSerialized = true)
     {
+        $this->storeSerialized = $storeSerialized;
         $this->createCacheItem = \Closure::bind(
             function ($key, $value, $isHit) use ($defaultLifetime) {
                 $item = new CacheItem();
@@ -37,7 +45,7 @@ class ArrayAdapter implements CacheItemPoolInterface
 
                 return $item;
             },
-            $this,
+            null,
             CacheItem::class
         );
     }
@@ -47,10 +55,16 @@ class ArrayAdapter implements CacheItemPoolInterface
      */
     public function getItem($key)
     {
+        if (!$isHit = $this->hasItem($key)) {
+            $value = null;
+        } elseif ($this->storeSerialized) {
+            $value = unserialize($this->values[$key]);
+        } else {
+            $value = $this->values[$key];
+        }
         $f = $this->createCacheItem;
-        $isHit = $this->hasItem($key);
 
-        return $f($key, $isHit ? $this->values[$key] : null, $isHit);
+        return $f($key, $value, $isHit);
     }
 
     /**
@@ -58,16 +72,11 @@ class ArrayAdapter implements CacheItemPoolInterface
      */
     public function getItems(array $keys = array())
     {
-        $f = $this->createCacheItem;
-        $items = array();
-        $now = time();
-
         foreach ($keys as $key) {
-            $isHit = isset($this->expiries[$this->validateKey($key)]) && ($this->expiries[$key] >= $now || !$this->deleteItem($key));
-            $items[$key] = $f($key, $isHit ? $this->values[$key] : null, $isHit);
+            CacheItem::validateKey($key);
         }
 
-        return $items;
+        return $this->generateItems($keys, time());
     }
 
     /**
@@ -75,7 +84,9 @@ class ArrayAdapter implements CacheItemPoolInterface
      */
     public function hasItem($key)
     {
-        return isset($this->expiries[$this->validateKey($key)]) && ($this->expiries[$key] >= time() || !$this->deleteItem($key));
+        CacheItem::validateKey($key);
+
+        return isset($this->expiries[$key]) && ($this->expiries[$key] >= time() || !$this->deleteItem($key));
     }
 
     /**
@@ -93,7 +104,9 @@ class ArrayAdapter implements CacheItemPoolInterface
      */
     public function deleteItem($key)
     {
-        unset($this->values[$this->validateKey($key)], $this->expiries[$key]);
+        CacheItem::validateKey($key);
+
+        unset($this->values[$key], $this->expiries[$key]);
 
         return true;
     }
@@ -118,31 +131,29 @@ class ArrayAdapter implements CacheItemPoolInterface
         if (!$item instanceof CacheItem) {
             return false;
         }
-        static $prefix = "\0Symfony\Component\Cache\CacheItem\0";
         $item = (array) $item;
-        $key = $item[$prefix.'key'];
-        $value = $item[$prefix.'value'];
-        $lifetime = $item[$prefix.'lifetime'];
+        $key = $item["\0*\0key"];
+        $value = $item["\0*\0value"];
+        $expiry = $item["\0*\0expiry"];
 
-        if (0 > $lifetime) {
+        if (null !== $expiry && $expiry <= time()) {
+            $this->deleteItem($key);
+
             return true;
         }
-
-        if (is_object($value)) {
+        if ($this->storeSerialized) {
             try {
-                $value = clone $value;
-            } catch (\Error $e) {
+                $value = serialize($value);
             } catch (\Exception $e) {
-            }
-            if (isset($e)) {
-                @trigger_error($e->__toString());
+                $type = is_object($value) ? get_class($value) : gettype($value);
+                CacheItem::log($this->logger, 'Failed to save key "{key}" ({type})', array('key' => $key, 'type' => $type, 'exception' => $e));
 
                 return false;
             }
         }
 
         $this->values[$key] = $value;
-        $this->expiries[$key] = $lifetime ? $lifetime + time() : PHP_INT_MAX;
+        $this->expiries[$key] = null !== $expiry ? $expiry : PHP_INT_MAX;
 
         return true;
     }
@@ -163,18 +174,20 @@ class ArrayAdapter implements CacheItemPoolInterface
         return true;
     }
 
-    private function validateKey($key)
+    private function generateItems(array $keys, $now)
     {
-        if (!is_string($key)) {
-            throw new InvalidArgumentException(sprintf('Cache key must be string, "%s" given', is_object($key) ? get_class($key) : gettype($key)));
-        }
-        if (!isset($key[0])) {
-            throw new InvalidArgumentException('Cache key length must be greater than zero');
-        }
-        if (isset($key[strcspn($key, '{}()/\@:')])) {
-            throw new InvalidArgumentException('Cache key contains reserved characters {}()/\@:');
-        }
+        $f = $this->createCacheItem;
 
-        return $key;
+        foreach ($keys as $key) {
+            if (!$isHit = isset($this->expiries[$key]) && ($this->expiries[$key] >= $now || !$this->deleteItem($key))) {
+                $value = null;
+            } elseif ($this->storeSerialized) {
+                $value = unserialize($this->values[$key]);
+            } else {
+                $value = $this->values[$key];
+            }
+
+            yield $key => $f($key, $value, $isHit);
+        }
     }
 }

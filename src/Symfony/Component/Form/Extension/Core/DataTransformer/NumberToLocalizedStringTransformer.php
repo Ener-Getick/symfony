@@ -96,9 +96,9 @@ class NumberToLocalizedStringTransformer implements DataTransformerInterface
     /**
      * Transforms a number type into localized number.
      *
-     * @param int|float $value Number value.
+     * @param int|float $value Number value
      *
-     * @return string Localized value.
+     * @return string Localized value
      *
      * @throws TransformationFailedException If the given value is not numeric
      *                                       or if the value can not be transformed.
@@ -163,7 +163,15 @@ class NumberToLocalizedStringTransformer implements DataTransformerInterface
             $value = str_replace(',', $decSep, $value);
         }
 
-        $result = $formatter->parse($value, \NumberFormatter::TYPE_DOUBLE, $position);
+        if (false !== strpos($value, $decSep)) {
+            $type = \NumberFormatter::TYPE_DOUBLE;
+        } else {
+            $type = PHP_INT_SIZE === 8
+                ? \NumberFormatter::TYPE_INT64
+                : \NumberFormatter::TYPE_INT32;
+        }
+
+        $result = $formatter->parse($value, $type, $position);
 
         if (intl_is_failure($formatter->getErrorCode())) {
             throw new TransformationFailedException($formatter->getErrorMessage());
@@ -171,6 +179,10 @@ class NumberToLocalizedStringTransformer implements DataTransformerInterface
 
         if ($result >= PHP_INT_MAX || $result <= -PHP_INT_MAX) {
             throw new TransformationFailedException('I don\'t have a clear idea what infinity looks like');
+        }
+
+        if (is_int($result) && $result === (int) $float = (float) $result) {
+            $result = $float;
         }
 
         if (false !== $encoding = mb_detect_encoding($value, null, true)) {
@@ -221,9 +233,9 @@ class NumberToLocalizedStringTransformer implements DataTransformerInterface
     /**
      * Rounds a number according to the configured scale and rounding mode.
      *
-     * @param int|float $number A number.
+     * @param int|float $number A number
      *
-     * @return int|float The rounded number.
+     * @return int|float The rounded number
      */
     private function round($number)
     {

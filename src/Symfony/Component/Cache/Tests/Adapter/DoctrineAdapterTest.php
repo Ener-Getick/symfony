@@ -22,6 +22,7 @@ class DoctrineAdapterTest extends CachePoolTest
 {
     protected $skippedTests = array(
         'testDeferredSaveWithoutCommit' => 'Assumes a shared cache which ArrayCache is not.',
+        'testSaveWithoutExpire' => 'Assumes a shared cache which ArrayCache is not.',
     );
 
     public function createCachePool()

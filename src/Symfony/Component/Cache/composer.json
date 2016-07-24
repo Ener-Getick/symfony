@@ -20,11 +20,16 @@
     },
     "require": {
         "php": ">=5.5.9",
-        "psr/cache": "~1.0"
+        "psr/cache": "~1.0",
+        "psr/log": "~1.0"
     },
     "require-dev": {
-        "cache/integration-tests": "^0.6",
-        "doctrine/cache": "~1.6"
+        "cache/integration-tests": "dev-master",
+        "doctrine/cache": "~1.6",
+        "predis/predis": "~1.0"
+    },
+    "suggest": {
+        "symfony/polyfill-apcu": "For using ApcuAdapter on HHVM"
     },
     "autoload": {
         "psr-4": { "Symfony\\Component\\Cache\\": "" },
@@ -35,7 +40,7 @@
     "minimum-stability": "dev",
     "extra": {
         "branch-alias": {
-            "dev-master": "3.1-dev"
+            "dev-master": "3.2-dev"
         }
     }
 }
