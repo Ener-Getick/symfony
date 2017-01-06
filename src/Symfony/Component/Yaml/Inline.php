@@ -13,6 +13,8 @@ namespace Symfony\Component\Yaml;
 
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Exception\DumpException;
+use Symfony\Component\Yaml\Tag\TagResolver;
+use Symfony\Component\Yaml\Tag\TimestampTag;
 
 /**
  * Inline implements a YAML parser/dumper for the YAML inline syntax.
@@ -26,6 +28,7 @@ class Inline
     const REGEX_QUOTED_STRING = '(?:"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"|\'([^\']*(?:\'\'[^\']*)*)\')';
 
     public static $parsedLineNumber;
+    public static $tagResolver;
 
     private static $exceptionOnInvalidType = false;
     private static $objectSupport = false;
@@ -212,7 +215,7 @@ class Inline
             case Escaper::requiresSingleQuoting($value):
             case preg_match('{^[0-9]+[_0-9]*$}', $value):
             case preg_match(self::getHexRegex(), $value):
-            case preg_match(self::getTimestampRegex(), $value):
+            case preg_match(TimestampTag::TIMESTAMP_REGEX, $value):
                 return Escaper::escapeWithSingleQuotes($value);
             default:
                 return $value;
@@ -325,6 +328,7 @@ class Inline
                 @trigger_error(sprintf('Not quoting the scalar "%s" starting with the "%%" indicator character is deprecated since Symfony 3.1 and will throw a ParseException in 4.0.', $output), E_USER_DEPRECATED);
             }
 
+            $output = trim($output);
             if ($evaluate) {
                 $output = self::evaluateScalar($output, $flags, $references);
             }
@@ -539,9 +543,6 @@ class Inline
      */
     private static function evaluateScalar($scalar, $flags, $references = array())
     {
-        $scalar = trim($scalar);
-        $scalarLower = strtolower($scalar);
-
         if (0 === strpos($scalar, '*')) {
             if (false !== $pos = strpos($scalar, '#')) {
                 $value = substr($scalar, 1, $pos - 2);
@@ -561,159 +562,63 @@ class Inline
             return $references[$value];
         }
 
-        switch (true) {
-            case 'null' === $scalarLower:
-            case '' === $scalar:
-            case '~' === $scalar:
-                return;
-            case 'true' === $scalarLower:
-                return true;
-            case 'false' === $scalarLower:
-                return false;
-            // Optimise for returning strings.
-            case $scalar[0] === '+' || $scalar[0] === '-' || $scalar[0] === '.' || $scalar[0] === '!' || is_numeric($scalar[0]):
-                switch (true) {
-                    case 0 === strpos($scalar, '!str'):
-                        return (string) substr($scalar, 5);
-                    case 0 === strpos($scalar, '! '):
-                        return (int) self::parseScalar(substr($scalar, 2), $flags);
-                    case 0 === strpos($scalar, '!php/object:'):
-                        if (self::$objectSupport) {
-                            return unserialize(substr($scalar, 12));
-                        }
-
-                        if (self::$exceptionOnInvalidType) {
-                            throw new ParseException('Object support when parsing a YAML file has been disabled.');
-                        }
-
-                        return;
-                    case 0 === strpos($scalar, '!!php/object:'):
-                        if (self::$objectSupport) {
-                            @trigger_error('The !!php/object tag to indicate dumped PHP objects is deprecated since version 3.1 and will be removed in 4.0. Use the !php/object tag instead.', E_USER_DEPRECATED);
-
-                            return unserialize(substr($scalar, 13));
-                        }
-
-                        if (self::$exceptionOnInvalidType) {
-                            throw new ParseException('Object support when parsing a YAML file has been disabled.');
-                        }
-
-                        return;
-                    case 0 === strpos($scalar, '!php/const:'):
-                        if (self::$constantSupport) {
-                            if (defined($const = substr($scalar, 11))) {
-                                return constant($const);
-                            }
-
-                            throw new ParseException(sprintf('The constant "%s" is not defined.', $const));
-                        }
-                        if (self::$exceptionOnInvalidType) {
-                            throw new ParseException(sprintf('The string "%s" could not be parsed as a constant. Have you forgotten to pass the "Yaml::PARSE_CONSTANT" flag to the parser?', $scalar));
-                        }
-
-                        return;
-                    case 0 === strpos($scalar, '!!float '):
-                        return (float) substr($scalar, 8);
-                    case preg_match('{^[+-]?[0-9][0-9_]*$}', $scalar):
-                        $scalar = str_replace('_', '', (string) $scalar);
-                        // omitting the break / return as integers are handled in the next case
-                    case ctype_digit($scalar):
-                        $raw = $scalar;
-                        $cast = (int) $scalar;
-
-                        return '0' == $scalar[0] ? octdec($scalar) : (((string) $raw == (string) $cast) ? $cast : $raw);
-                    case '-' === $scalar[0] && ctype_digit(substr($scalar, 1)):
-                        $raw = $scalar;
-                        $cast = (int) $scalar;
-
-                        return '0' == $scalar[1] ? octdec($scalar) : (((string) $raw === (string) $cast) ? $cast : $raw);
-                    case is_numeric($scalar):
-                    case preg_match(self::getHexRegex(), $scalar):
-                        $scalar = str_replace('_', '', $scalar);
-
-                        return '0x' === $scalar[0].$scalar[1] ? hexdec($scalar) : (float) $scalar;
-                    case '.inf' === $scalarLower:
-                    case '.nan' === $scalarLower:
-                        return -log(0);
-                    case '-.inf' === $scalarLower:
-                        return log(0);
-                    case 0 === strpos($scalar, '!!binary '):
-                        return self::evaluateBinaryScalar(substr($scalar, 9));
-                    case preg_match('/^(-|\+)?[0-9][0-9,]*(\.[0-9_]+)?$/', $scalar):
-                    case preg_match('/^(-|\+)?[0-9][0-9_]*(\.[0-9_]+)?$/', $scalar):
-                        if (false !== strpos($scalar, ',')) {
-                            @trigger_error('Using the comma as a group separator for floats is deprecated since version 3.2 and will be removed in 4.0.', E_USER_DEPRECATED);
-                        }
-
-                        return (float) str_replace(array(',', '_'), '', $scalar);
-                    case preg_match(self::getTimestampRegex(), $scalar):
-                        if (Yaml::PARSE_DATETIME & $flags) {
-                            // When no timezone is provided in the parsed date, YAML spec says we must assume UTC.
-                            return new \DateTime($scalar, new \DateTimeZone('UTC'));
-                        }
-
-                        $timeZone = date_default_timezone_get();
-                        date_default_timezone_set('UTC');
-                        $time = strtotime($scalar);
-                        date_default_timezone_set($timeZone);
-
-                        return $time;
+        $tagResolver = self::getTagResolver($flags);
+        if ($scalar && '!' === $scalar[0]) {
+            if (0 === strpos($scalar, '!php/object:')) {
+                if (self::$objectSupport) {
+                    return unserialize(substr($scalar, 12));
                 }
-            default:
-                return (string) $scalar;
+
+                if (self::$exceptionOnInvalidType) {
+                    throw new ParseException('Object support when parsing a YAML file has been disabled.');
+                }
+
+                return;
+            }
+            if (0 === strpos($scalar, '!!php/object:')) {
+                if (self::$objectSupport) {
+                    @trigger_error('The !!php/object tag to indicate dumped PHP objects is deprecated since version 3.1 and will be removed in 4.0. Use the !php/object tag instead.', E_USER_DEPRECATED);
+
+                    return unserialize(substr($scalar, 13));
+                }
+
+                if (self::$exceptionOnInvalidType) {
+                    throw new ParseException('Object support when parsing a YAML file has been disabled.');
+                }
+
+                return;
+            }
+            if (0 === strpos($scalar, '!php/const:')) {
+                if (self::$constantSupport) {
+                    if (defined($const = substr($scalar, 11))) {
+                        return constant($const);
+                    }
+
+                    throw new ParseException(sprintf('The constant "%s" is not defined.', $const));
+                }
+                if (self::$exceptionOnInvalidType) {
+                    throw new ParseException(sprintf('The string "%s" could not be parsed as a constant. Have you forgotten to pass the "Yaml::PARSE_CONSTANT" flag to the parser?', $scalar));
+                }
+
+                return;
+            }
+
+            $tagLength = strcspn($scalar, " \t", 1);
+            $tag = substr($scalar, 1, $tagLength);
+            if ($tagResolver->supportsTag($tag)) {
+                $i = 0;
+                $scalar = self::parseScalar(ltrim(substr($scalar, $tagLength + 1)), $flags, null, array('"', "'"), $i, false, $references);
+
+                return $tagResolver->resolve($scalar, $tag);
+            }
         }
-    }
 
-    /**
-     * @param string $scalar
-     *
-     * @return string
-     *
-     * @internal
-     */
-    public static function evaluateBinaryScalar($scalar)
-    {
-        $parsedBinaryData = self::parseScalar(preg_replace('/\s/', '', $scalar));
-
-        if (0 !== (strlen($parsedBinaryData) % 4)) {
-            throw new ParseException(sprintf('The normalized base64 encoded data (data without whitespace characters) length must be a multiple of four (%d bytes given).', strlen($parsedBinaryData)));
-        }
-
-        if (!preg_match('#^[A-Z0-9+/]+={0,2}$#i', $parsedBinaryData)) {
-            throw new ParseException(sprintf('The base64 encoded data (%s) contains invalid characters.', $parsedBinaryData));
-        }
-
-        return base64_decode($parsedBinaryData, true);
+        return $tagResolver->resolve($scalar);
     }
 
     private static function isBinaryString($value)
     {
         return !preg_match('//u', $value) || preg_match('/[^\x09-\x0d\x20-\xff]/', $value);
-    }
-
-    /**
-     * Gets a regex that matches a YAML date.
-     *
-     * @return string The regular expression
-     *
-     * @see http://www.yaml.org/spec/1.2/spec.html#id2761573
-     */
-    private static function getTimestampRegex()
-    {
-        return <<<EOF
-        ~^
-        (?P<year>[0-9][0-9][0-9][0-9])
-        -(?P<month>[0-9][0-9]?)
-        -(?P<day>[0-9][0-9]?)
-        (?:(?:[Tt]|[ \t]+)
-        (?P<hour>[0-9][0-9]?)
-        :(?P<minute>[0-9][0-9])
-        :(?P<second>[0-9][0-9])
-        (?:\.(?P<fraction>[0-9]*))?
-        (?:[ \t]*(?P<tz>Z|(?P<tz_sign>[-+])(?P<tz_hour>[0-9][0-9]?)
-        (?::(?P<tz_minute>[0-9][0-9]))?))?)?
-        $~x
-EOF;
     }
 
     /**
@@ -724,5 +629,14 @@ EOF;
     private static function getHexRegex()
     {
         return '~^0x[0-9a-f_]++$~i';
+    }
+
+    private static function getTagResolver($flags)
+    {
+        if (null === self::$tagResolver) {
+            return TagResolver::create($flags);
+        }
+
+        return self::$tagResolver;
     }
 }

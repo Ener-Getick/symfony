@@ -12,6 +12,7 @@
 namespace Symfony\Component\Yaml;
 
 use Symfony\Component\Yaml\Exception\ParseException;
+use Symfony\Component\Yaml\Tag\TagResolver;
 
 /**
  * Parser parses YAML strings to convert them to PHP arrays.
@@ -31,6 +32,7 @@ class Parser
     private $refs = array();
     private $skippedLineNumbers = array();
     private $locallySkippedLineNumbers = array();
+    private $tagResolver;
 
     /**
      * Constructor.
@@ -101,6 +103,17 @@ class Parser
             mb_internal_encoding('UTF-8');
         }
 
+        $this->tagResolver = TagResolver::create($flags);
+        Inline::$tagResolver = $this->tagResolver;
+        try {
+            return $this->doParse($value, $flags);
+        } finally {
+            Inline::$tagResolver = null;
+        }
+    }
+
+    private function doParse($value, $flags)
+    {
         $data = array();
         $context = null;
         $allowOverwrite = false;
@@ -348,7 +361,7 @@ class Parser
             $skippedLineNumbers[] = $lineNumber;
         }
 
-        $parser = new self($offset, $this->totalNumberOfLines, $skippedLineNumbers);
+        $parser = new self($offset, $this->totalNumberOfLines, $skippedLineNumbers, $this->tagResolver);
         $parser->refs = &$this->refs;
 
         return $parser->parse($yaml, $flags);
@@ -563,11 +576,14 @@ class Parser
 
             $data = $this->parseBlockScalar($matches['separator'], preg_replace('#\d+#', '', $modifiers), (int) abs($modifiers));
 
-            if (isset($matches['tag']) && '!!binary' === $matches['tag']) {
-                return Inline::evaluateBinaryScalar($data);
+            if (isset($matches['tag'])) {
+                $tag = substr($matches['tag'], 1);
+                if ($this->tagResolver->supportsTag($tag)) {
+                    return $this->tagResolver->resolve($data, $tag);
+                }
             }
 
-            return $data;
+            return $this->tagResolver->resolve($data);
         }
 
         try {
