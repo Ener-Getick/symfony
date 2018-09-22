@@ -364,6 +364,20 @@ class DebugClassLoaderTest extends TestCase
             'The "Symfony\Component\Debug\Tests\Fixtures\InternalTrait2::internalMethod()" method is considered internal since version 3.4. It may change without further notice. You should not extend it from "Test\Symfony\Component\Debug\Tests\ExtendsInternals".',
         ));
     }
+
+    public function testUseTraitWithInternalMethod()
+    {
+        $deprecations = array();
+        set_error_handler(function ($type, $msg) use (&$deprecations) { $deprecations[] = $msg; });
+        $e = error_reporting(E_USER_DEPRECATED);
+
+        class_exists('Test\\'.__NAMESPACE__.'\\UseTraitWithInternalMethod', true);
+
+        error_reporting($e);
+        restore_error_handler();
+
+        $this->assertSame(array(), $deprecations);
+    }
 }
 
 class ClassLoader
@@ -417,6 +431,8 @@ class ClassLoader
             }');
         } elseif ('Test\\'.__NAMESPACE__.'\ExtendsInternalsParent' === $class) {
             eval('namespace Test\\'.__NAMESPACE__.'; class ExtendsInternalsParent extends \\'.__NAMESPACE__.'\Fixtures\InternalClass implements \\'.__NAMESPACE__.'\Fixtures\InternalInterface { }');
+        } elseif ('Test\\'.__NAMESPACE__.'\UseTraitWithInternalMethod' === $class) {
+            eval('namespace Test\\'.__NAMESPACE__.'; class UseTraitWithInternalMethod { use \\'.__NAMESPACE__.'\Fixtures\TraitWithInternalMethod; }');
         }
     }
 }
