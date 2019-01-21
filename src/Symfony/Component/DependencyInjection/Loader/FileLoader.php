@@ -91,6 +91,13 @@ abstract class FileLoader extends BaseFileLoader
      */
     protected function setDefinition($id, Definition $definition)
     {
+        if ($this->container->hasDefinition($id)) {
+            foreach ($this->container->getDefinition($id)->getBindings() as $key => $binding) {
+                list(, $bindingId) = $binding->getValues();
+                $this->container->addRemovedBindingId($bindingId);
+            }
+        }
+
         if ($this->isLoadingInstanceof) {
             if (!$definition instanceof ChildDefinition) {
                 throw new InvalidArgumentException(sprintf('Invalid type definition "%s": ChildDefinition expected, "%s" given.', $id, \get_class($definition)));
