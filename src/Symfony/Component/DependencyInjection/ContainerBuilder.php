@@ -1525,9 +1525,14 @@ class ContainerBuilder extends Container implements TaggedContainerInterface
      *
      * @internal
      */
-    public function addRemovedBindingId($id)
+    public function addRemovedBindingIds($id)
     {
-        $this->removedBindingIds[(int) $id] = true;
+        if ($this->hasDefinition($id)) {
+            foreach ($this->getDefinition($id)->getBindings() as $key => $binding) {
+                list(, $bindingId) = $binding->getValues();
+                $this->removedBindingIds[(int) $bindingId] = true;
+            }
+        }
     }
 
     /**

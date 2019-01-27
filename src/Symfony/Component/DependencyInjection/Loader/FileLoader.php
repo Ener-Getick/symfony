@@ -91,12 +91,7 @@ abstract class FileLoader extends BaseFileLoader
      */
     protected function setDefinition($id, Definition $definition)
     {
-        if ($this->container->hasDefinition($id)) {
-            foreach ($this->container->getDefinition($id)->getBindings() as $key => $binding) {
-                list(, $bindingId) = $binding->getValues();
-                $this->container->addRemovedBindingId($bindingId);
-            }
-        }
+        $this->container->addRemovedBindingIds($id);
 
         if ($this->isLoadingInstanceof) {
             if (!$definition instanceof ChildDefinition) {
